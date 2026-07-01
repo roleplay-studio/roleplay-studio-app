@@ -54,7 +54,9 @@ class UploadService:
 
     @property
     def upload_dir(self) -> str:
-        return self._settings.upload_dir
+        # ``effective_upload_dir`` is absolute; relative ``upload_dir``
+        # from .env is resolved against the data dir at access time.
+        return str(self._settings.effective_upload_dir)
 
     async def upload(self, thread_id: int, bot_id: int, file: UploadedFile) -> ThreadFileDTO:
         """Validate, save file to disk, extract text, and persist metadata."""

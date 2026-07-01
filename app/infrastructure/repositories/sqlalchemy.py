@@ -88,7 +88,9 @@ class SqlAlchemyStore:
 
     def __init__(self, db_path: str | None = None, settings: Settings | None = None):
         self.settings = settings or Settings.from_env()
-        self.db_path = db_path or self.settings.db_path
+        # ``effective_db_path`` is absolute; relative ``db_path`` from
+        # .env is resolved against the data dir at access time.
+        self.db_path = db_path or str(self.settings.effective_db_path)
         engine_url = (
             self.db_path
             if self.db_path.startswith("sqlite+aiosqlite:///")

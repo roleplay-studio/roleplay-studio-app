@@ -127,10 +127,17 @@ class Settings(BaseSettings):
     app_referer: str = "http://localhost:1420"
 
     # ── Storage ────────────────────────────────────────────────────
-    db_path: str = str(_DATA_DIR / "conversations.db")
-    chroma_persist_dir: str = str(_DATA_DIR / "chroma_db")
+    # The default values are bare filenames / folder names. The
+    # *effective* path (absolute, with ``ROLEPLAY_DATA_DIR`` resolved
+    # for relative values) is exposed via the ``data_dir`` and
+    # ``effective_*`` properties below. This split lets the Settings
+    # page show the user a clean, round-trippable value
+    # (e.g. ``conversations.db``) while runtime code keeps working
+    # with a full filesystem path.
+    db_path: str = "conversations.db"
+    chroma_persist_dir: str = "chroma_db"
     chroma_collection_prefix: str = "kb_bot_"
-    upload_dir: str = "data/uploads"
+    upload_dir: str = "uploads"
 
     # ── RAG / Memory ───────────────────────────────────────────────
     knowledge_relevance_threshold: float = Field(0.3, ge=0.0, le=1.0)
@@ -304,12 +311,66 @@ class Settings(BaseSettings):
         return self.openrouter_api_key.get_secret_value()
 
     @property
+    def data_dir(self) -> Path:
+        """Absolute data directory for runtime files.
+
+        Resolved at access time so it picks up ``ROLEPLAY_DATA_DIR``
+        changes that happen AFTER ``Settings`` is constructed — the
+        bare default values in this class can't bake the data dir in
+        at import time without freezing it to whatever was set when
+        this module first loaded.
+
+        In production ``backend/run_backend.py`` sets
+        ``ROLEPLAY_DATA_DIR`` before importing ``app.*`` so this
+        returns the same value the legacy module-level ``_DATA_DIR``
+        would have computed. In dev the project root is the fallback.
+        """
+        return Path(
+            os.environ.get(
+                "ROLEPLAY_DATA_DIR",
+                Path(__file__).resolve().parent.parent.parent,
+            )
+        )
+
+    def _resolve(self, raw: str) -> Path:
+        """Resolve a possibly-relative path against the data dir.
+
+        Absolute values pass through unchanged. Relative values are
+        joined onto ``self.data_dir`` so a bare ``conversations.db``
+        in ``.env`` (or in code) lands inside the active data dir.
+        """
+        p = Path(raw)
+        if p.is_absolute():
+            return p
+        return self.data_dir / p
+
+    @property
+    def effective_db_path(self) -> Path:
+        """Absolute SQLite path — relative ``db_path`` resolves under the data dir."""
+        return self._resolve(self.db_path)
+
+    @property
+    def effective_chroma_persist_dir(self) -> Path:
+        """Absolute Chroma directory — relative values resolve under the data dir."""
+        return self._resolve(self.chroma_persist_dir)
+
+    @property
+    def effective_upload_dir(self) -> Path:
+        """Absolute uploads directory — relative values resolve under the data dir.
+
+        The avatar folder sits one level below this path so the public
+        URL stays ``/uploads/avatars/…`` regardless of where uploads
+        live on disk.
+        """
+        return self._resolve(self.upload_dir)
+
+    @property
     def db_url_for_alembic(self) -> str:
         """Full async SQLAlchemy URL for the configured SQLite database.
 
         Used by Alembic's env.py to stay in sync with the app's DB path.
         """
-        path = self.db_path
+        path = str(self.effective_db_path)
         if path.startswith("sqlite+aiosqlite:///"):
             return path
         if path.startswith("sqlite:///"):
@@ -322,6 +383,7 @@ class Settings(BaseSettings):
 
         Kept in sync with ``api.constants.UPLOADS_DIR`` so the upload-avatar
         route, the bot-import service, and the export endpoint all read/write
-        from the same physical location.
+        from the same physical location. The avatar folder sits one level
+        below ``upload_dir`` so the public URL stays ``/uploads/avatars/…``.
         """
-        return Path(__file__).resolve().parent.parent.parent / "uploads" / "avatars"
+        return self.effective_upload_dir / "avatars"

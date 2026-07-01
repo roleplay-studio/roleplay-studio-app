@@ -262,17 +262,10 @@ wheels = [
 [[package]]
 name = "character-card"
 version = "0.1.0"
-source = { editable = "../../character-card" }
+source = { git = "https://github.com/roleplay-studio/character-card?branch=main#842e15f7f14c411d2f9e3baaef4563f58cc6c43e" }
 dependencies = [
     { name = "pillow" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "pillow", specifier = ">=10.0.0" },
-    { name = "pytest", marker = "extra == 'test'", specifier = ">=7.0.0" },
-]
-provides-extras = ["test"]
 
 [[package]]
 name = "charset-normalizer"
@@ -461,11 +454,7 @@ wheels = [
 [[package]]
 name = "format-standart-rp"
 version = "0.1.0"
-source = { editable = "../../format-standart-rp" }
-
-[package.metadata]
-requires-dist = [{ name = "pytest", marker = "extra == 'test'", specifier = ">=7.0.0" }]
-provides-extras = ["test"]
+source = { git = "https://github.com/roleplay-studio/format-standart-rp?branch=main#f1a9651bab3ef7e893ea2699c7584e0e5c819521" }
 
 [[package]]
 name = "frozenlist"
@@ -2519,10 +2508,10 @@ dev = [
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.20.0" },
     { name = "alembic", specifier = ">=1.18.4" },
-    { name = "character-card", editable = "../../character-card" },
+    { name = "character-card", git = "https://github.com/roleplay-studio/character-card?branch=main" },
     { name = "chromadb", specifier = ">=0.5.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
-    { name = "format-standart-rp", editable = "../../format-standart-rp" },
+    { name = "format-standart-rp", git = "https://github.com/roleplay-studio/format-standart-rp?branch=main" },
     { name = "greenlet", specifier = ">=3.0.0" },
     { name = "httpx", specifier = ">=0.27.0" },
     { name = "httpx", marker = "extra == 'test'", specifier = ">=0.27.0" },

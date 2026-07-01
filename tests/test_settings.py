@@ -19,7 +19,10 @@ class TestAvatarsDir:
         from api.constants import UPLOADS_DIR
 
         assert isinstance(settings.avatars_dir, Path)
-        assert settings.avatars_dir == Path(UPLOADS_DIR).resolve(), (
+        # Compare resolved paths so a relative ``UPLOAD_DIR`` (e.g.
+        # ``uploads``) and an absolute one resolve to the same string
+        # when they actually point at the same on-disk location.
+        assert settings.avatars_dir.resolve() == Path(UPLOADS_DIR).resolve(), (
             f"avatars_dir={settings.avatars_dir} != UPLOADS_DIR={UPLOADS_DIR}"
         )
         del expected  # silence linter

@@ -39,7 +39,7 @@ install: ## Install backend + frontend dependencies
 .PHONY: install-backend
 install-backend: ## Set up Python venv and install backend deps
 	uv sync
-	$(PY) -m pip install -e ".[test]"
+	uv pip install --python $(PY) -e ".[test]"
 
 .PHONY: install-frontend
 install-frontend: ## Install frontend npm deps

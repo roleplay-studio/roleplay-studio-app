@@ -98,8 +98,8 @@ line-length = 100
 asyncio_mode = "auto"
 
 [tool.uv.sources]
-character-card = { path = "../../character-card", editable = true }
-format-standart-rp = { path = "../../format-standart-rp", editable = true }
+character-card = { git = "https://github.com/roleplay-studio/character-card", branch = "main" }
+format-standart-rp = { git = "https://github.com/roleplay-studio/format-standart-rp", branch = "main" }
 
 # --- mypy ---
 # We run mypy in strict-adjacent mode so the per-line errors below are
