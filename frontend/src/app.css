@@ -1,0 +1,386 @@
+/* ════════════════════════════════════════════
+   Tailwind CSS v4 + FlyonUI
+   ════════════════════════════════════════════ */
+@import 'tailwindcss';
+
+/* FlyonUI variants — до @plugin */
+@import 'flyonui/variants.css';
+@source '../node_modules/flyonui/flyonui.js';
+
+@plugin 'flyonui' {
+  themes:
+    soft --default,
+    dark --prefersdark,
+    gourmet;
+}
+@plugin '@iconify/tailwind4';
+
+/* Safelist для динамических иконок Tabler */
+@source './lib/ui/icons-safelist.ts';
+
+/* ── Theme: кастомные цвета из tailwind.config.js ──── */
+@theme {
+  --color-surface-50: var(--theme-surface-50, #f8f7ff);
+  --color-surface-100: var(--theme-surface-100, #eeeaff);
+  --color-surface-200: var(--theme-surface-200, #ddd5ff);
+  --color-surface-300: var(--theme-surface-300, #c4b5ff);
+  --color-surface-400: var(--theme-surface-400, #a78bfa);
+  --color-surface-500: var(--theme-surface-500, #8b5cf6);
+  --color-surface-600: var(--theme-surface-600, #7c3aed);
+  --color-surface-700: var(--theme-surface-700, #6d28d9);
+  --color-surface-800: var(--theme-surface-800, #5b21b6);
+  --color-surface-900: var(--theme-surface-900, #4c1d95);
+  --color-surface-950: var(--theme-surface-950, #2e1065);
+
+  --color-neko-50: #ecfeff;
+  --color-neko-300: #67e8f9;
+  --color-neko-500: #06b6d4;
+
+  --font-family-sans: 'Maple Mono', 'system-ui', 'sans-serif';
+}
+
+/* ════════════════════════════════════════════
+   FLYONUI THEME OVERRIDES — Roleplay Studio
+   ════════════════════════════════════════════ */
+/* Brand palette */
+:root {
+  --color-roleplay-studio-50: oklch(92.8% 0.08 265);
+  --color-roleplay-studio-100: oklch(88.6% 0.1 265);
+  --color-roleplay-studio-200: oklch(80.4% 0.12 265);
+  --color-roleplay-studio-300: oklch(72.4% 0.14 265);
+  --color-roleplay-studio-400: oklch(64.6% 0.16 265);
+  --color-roleplay-studio-500: oklch(57% 0.14 265);
+  --color-roleplay-studio-600: oklch(49.6% 0.12 265);
+  --color-roleplay-studio-700: oklch(42.4% 0.1 265);
+  --color-roleplay-studio-800: oklch(35.4% 0.08 265);
+  --color-roleplay-studio-900: oklch(28.6% 0.06 265);
+  --color-roleplay-studio-950: oklch(25.3% 0.05 265);
+  --color-roleplay-studio-gray-50: oklch(98% 0.002 265);
+  --color-roleplay-studio-gray-100: oklch(95.5% 0.004 265);
+  --color-roleplay-studio-gray-200: oklch(89.7% 0.008 265);
+  --color-roleplay-studio-gray-300: oklch(82.7% 0.012 265);
+  --color-roleplay-studio-gray-400: oklch(73% 0.018 265);
+  --color-roleplay-studio-gray-500: oklch(62.5% 0.02 265);
+  --color-roleplay-studio-gray-600: oklch(52.8% 0.016 265);
+  --color-roleplay-studio-gray-700: oklch(41.4% 0.012 265);
+  --color-roleplay-studio-gray-800: oklch(26.9% 0.006 265);
+  --color-roleplay-studio-gray-900: oklch(20.5% 0.004 265);
+  --color-roleplay-studio-gray-950: oklch(14.1% 0.002 265);
+}
+
+/* FlyonUI theme variables — LIGHT */
+:root {
+  --color-primary: var(--color-roleplay-studio-600);
+  --color-primary-content: white;
+  --color-secondary: var(--color-roleplay-studio-gray-900);
+  --color-secondary-content: white;
+  --color-accent: var(--color-roleplay-studio-500);
+  --color-accent-content: white;
+  --color-neutral: var(--color-roleplay-studio-gray-200);
+  --color-neutral-content: var(--color-roleplay-studio-gray-800);
+  --color-base-100: white;
+  --color-base-200: var(--color-roleplay-studio-gray-50);
+  --color-base-300: var(--color-roleplay-studio-gray-100);
+  --color-info: #0ea5e9;
+  --color-info-content: white;
+  --color-success: #10b981;
+  --color-success-content: white;
+  --color-warning: #f59e0b;
+  --color-warning-content: white;
+  --color-error: #ef4444;
+  --color-error-content: white;
+}
+
+/* FlyonUI theme variables — DARK */
+.dark {
+  --color-primary: var(--color-roleplay-studio-500);
+  --color-primary-content: white;
+  --color-secondary: white;
+  --color-secondary-content: var(--color-roleplay-studio-gray-800);
+  --color-accent: var(--color-roleplay-studio-400);
+  --color-accent-content: white;
+  --color-neutral: var(--color-roleplay-studio-gray-600);
+  --color-neutral-content: var(--color-roleplay-studio-gray-200);
+  --color-base-100: var(--color-roleplay-studio-gray-800);
+  --color-base-200: var(--color-roleplay-studio-gray-900);
+  --color-base-300: var(--color-roleplay-studio-gray-950);
+  --color-info: #38bdf8;
+  --color-info-content: white;
+  --color-success: #34d399;
+  --color-success-content: white;
+  --color-warning: #fbbf24;
+  --color-warning-content: black;
+  --color-error: #f87171;
+  --color-error-content: white;
+}
+
+/* ── Maple Mono — локальный моноширинный шрифт ──── */
+@font-face {
+  font-family: 'Maple Mono';
+  font-weight: 100;
+  font-style: normal;
+  font-display: swap;
+  src: url('../fonts/MapleMono-Thin.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Maple Mono';
+  font-weight: 100;
+  font-style: italic;
+  font-display: swap;
+  src: url('../fonts/MapleMono-ThinItalic.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Maple Mono';
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+  src: url('../fonts/MapleMono-Light.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Maple Mono';
+  font-weight: 300;
+  font-style: italic;
+  font-display: swap;
+  src: url('../fonts/MapleMono-LightItalic.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Maple Mono';
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  src: url('../fonts/MapleMono-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Maple Mono';
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+  src: url('../fonts/MapleMono-Italic.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Maple Mono';
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url('../fonts/MapleMono-Medium.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Maple Mono';
+  font-weight: 500;
+  font-style: italic;
+  font-display: swap;
+  src: url('../fonts/MapleMono-MediumItalic.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Maple Mono';
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url('../fonts/MapleMono-SemiBold.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Maple Mono';
+  font-weight: 600;
+  font-style: italic;
+  font-display: swap;
+  src: url('../fonts/MapleMono-SemiBoldItalic.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Maple Mono';
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url('../fonts/MapleMono-Bold.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Maple Mono';
+  font-weight: 700;
+  font-style: italic;
+  font-display: swap;
+  src: url('../fonts/MapleMono-BoldItalic.ttf') format('truetype');
+}
+
+/* ── Raycast Design System — CSS Variables ──────── */
+:root {
+  /* Raycast surfaces */
+  --ray-bg: #f5f5f7;
+  --ray-surface: #ffffff;
+  --ray-surface-raised: #f0f0f2;
+  --ray-overlay: #ffffff;
+
+  /* Note: --ray-code-bg / --ray-code-text and the --hljs-*
+     token palette are defined in the MarkdownRenderer
+     component (overrides on `.markdown` and `.dark .markdown`)
+     because sibling Svelte components clobbered the bare
+     `:root` definitions below. Keep that in mind before
+     moving them back here. */
+
+  /* Raycast borders */
+  --ray-border: rgba(0, 0, 0, 0.06);
+  --ray-border-strong: rgba(0, 0, 0, 0.1);
+  --ray-border-card: rgba(0, 0, 0, 0.06);
+  --ray-border-subtle: rgba(0, 0, 0, 0.04);
+
+  /* Raycast text */
+  --ray-text: #1d1d1f;
+  --ray-text-secondary: #6e6e73;
+  --ray-text-tertiary: #86868b;
+
+  /* Raycast accents */
+  --ray-blue: hsl(211, 100%, 50%);
+  --ray-red: #ff3b30;
+  --ray-green: #34c759;
+  --ray-yellow: #f59e0b;
+  --ray-accent: #8b5cf6;
+
+  /* Raycast shadows */
+  --ray-shadow-ring: rgba(0, 0, 0, 0.04);
+  --ray-shadow-inset: rgba(0, 0, 0, 0.02);
+
+  /* Scrollbar */
+  --theme-scrollbar: rgba(99, 102, 241, 0.15);
+  --theme-scrollbar-hover: rgba(99, 102, 241, 0.3);
+}
+
+.dark {
+  /* Raycast dark surfaces — near-black blue-tint */
+  --ray-bg: #07080a;
+  --ray-surface: #101111;
+  --ray-surface-raised: #1b1c1e;
+  --ray-overlay: #1b1c1e;
+
+  /* (--ray-code-* and --hljs-* are defined in
+     MarkdownRenderer.svelte — see comment above.) */
+
+  /* Raycast dark borders */
+  --ray-border: rgba(255, 255, 255, 0.06);
+  --ray-border-strong: rgba(255, 255, 255, 0.1);
+  --ray-border-card: rgba(255, 255, 255, 0.06);
+  --ray-border-subtle: rgba(255, 255, 255, 0.04);
+
+  /* Raycast dark text */
+  --ray-text: #f9f9f9;
+  --ray-text-secondary: #9c9c9d;
+  --ray-text-tertiary: #6a6b6c;
+
+  /* Raycast dark accents */
+  --ray-blue: hsl(202, 100%, 67%);
+  --ray-red: #ff6363;
+  --ray-green: #5fc992;
+  --ray-yellow: #ffbc33;
+  --ray-accent: #a78bfa;
+
+  /* Raycast dark shadows */
+  --ray-shadow-ring: rgb(27, 28, 30);
+  --ray-shadow-inset: rgb(7, 8, 10);
+
+  /* Scrollbar */
+  --theme-scrollbar: rgba(139, 92, 246, 0.3);
+  --theme-scrollbar-hover: rgba(139, 92, 246, 0.5);
+}
+
+/* ── Theme aliases (backwards compat) ───────────── */
+:root {
+  --theme-bg: var(--ray-bg);
+  --theme-surface: var(--ray-surface);
+  --theme-text: var(--ray-text);
+  --theme-text-secondary: var(--ray-text-secondary);
+  --theme-border: var(--ray-border);
+}
+
+/* ── Raycast utility classes ──────────────────────── */
+/* Use instead of duplicating .ray-btn and .ray-card on every page */
+
+/* Raycast Card */
+.ray-card {
+  background: var(--ray-bg-card, var(--ray-surface));
+  border: 1px solid var(--ray-border-card);
+  border-radius: 12px;
+  padding: 20px;
+  box-shadow:
+    var(--ray-shadow-ring) 0px 0px 0px 1px,
+    var(--ray-shadow-inset) 0px 0px 0px 1px inset;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Raycast Pill Button */
+.ray-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border-radius: 86px;
+  background: transparent;
+  color: var(--ray-text);
+  font-family: 'Maple Mono', system-ui, sans-serif;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+  box-shadow:
+    color-mix(in srgb, var(--ray-text) 10%, transparent) 0px 1px 0px 0px inset,
+    color-mix(in srgb, #000 3%, transparent) 0px 7px 3px;
+  border: 1px solid var(--ray-border-strong);
+  white-space: nowrap;
+}
+.ray-btn:hover {
+  opacity: 0.7;
+}
+.ray-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.ray-btn.primary {
+  background: color-mix(in srgb, var(--ray-text) 8%, transparent);
+  border-color: var(--ray-border-strong);
+}
+.ray-btn.primary:hover {
+  opacity: 0.8;
+}
+.ray-btn.danger {
+  background: color-mix(in srgb, var(--ray-red) 10%, transparent);
+  border-color: color-mix(in srgb, var(--ray-red) 20%, transparent);
+  color: var(--ray-red);
+}
+
+body {
+  font-family: 'Maple Mono', system-ui, monospace;
+  background: var(--ray-bg);
+  color: var(--ray-text);
+  letter-spacing: 0.2px;
+}
+
+/* ── Theme utility classes ───────────────────────── */
+.bg-theme {
+  background-color: var(--ray-bg);
+}
+.text-theme {
+  color: var(--ray-text);
+}
+.text-theme-secondary {
+  color: var(--ray-text-secondary);
+}
+.bg-theme-surface {
+  background: var(--ray-surface);
+}
+.border-theme {
+  border-color: var(--ray-border);
+}
+
+/* ── Scrollbar ───────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--theme-scrollbar);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--theme-scrollbar-hover);
+}

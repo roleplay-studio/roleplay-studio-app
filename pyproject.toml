@@ -1,0 +1,172 @@
+[project]
+name = "roleplay-studio"
+version = "0.1.0"
+description = "Native macOS desktop app for LLM roleplay chats with per-bot RAG, streaming, and story branching"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [
+    { name = "Dmitriy Nyashkin", email = "dmitriy@nyashk.in" },
+]
+keywords = [
+    "llm",
+    "roleplay",
+    "chatbot",
+    "openrouter",
+    "rag",
+    "tauri",
+    "svelte",
+    "fastapi",
+    "character-card",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: MacOS X",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS :: MacOS X",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Communications :: Chat",
+    "Topic :: Multimedia :: Graphics",
+    "Typing :: Typed",
+]
+requires-python = ">=3.13"
+dependencies = [
+    "langchain>=1.2.18",
+    "langchain-community>=0.2.12",
+    "langchain-openai>=0.1.20",
+    "langchain-text-splitters>=1.1.2",
+    "langgraph>=0.2.0",
+    "chromadb>=0.5.0",
+    "openai>=2.36.0",
+    "langchain-chroma>=1.1.0",
+    "sqlmodel>=0.0.22",
+    "fastapi>=0.115.0",
+    "hypercorn>=0.17.0",
+    "python-multipart>=0.0.29",
+    "python-dotenv>=1.2.2",
+    "httpx>=0.27.0",
+    "aiosqlite>=0.20.0",
+    "greenlet>=3.0.0",
+    "Pillow>=10.0.0",
+    "python-docx>=1.1.0",
+    "pypdf>=4.0.0",
+    "alembic>=1.18.4",
+    "qrcode[pil]>=7.4",
+    "pydantic>=2.10",
+    "pydantic-settings>=2.6",
+    # m20: structured logging for ELK/Sentry/Datadog ingestion.
+    # Optional in the sense that the app runs fine without it
+    # (falls back to stdlib logging), but recommended for any
+    # non-toy deployment so the log lines are machine-parseable.
+    "structlog>=24.1.0",
+    "character-card",
+    "format-standart-rp",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "httpx>=0.27.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/nyashkin/roleplay-studio"
+Repository = "https://github.com/nyashkin/roleplay-studio"
+Issues = "https://github.com/nyashkin/roleplay-studio/issues"
+Changelog = "https://github.com/nyashkin/roleplay-studio/blob/main/CHANGELOG.md"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*", "api*", "scenarios*"]
+
+[tool.setuptools]
+py-modules = ["engine", "schemas"]
+
+[tool.setuptools.package-data]
+"app" = ["py.typed"]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 100
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.uv.sources]
+character-card = { path = "../../character-card", editable = true }
+format-standart-rp = { path = "../../format-standart-rp", editable = true }
+
+# --- mypy ---
+# We run mypy in strict-adjacent mode so the per-line errors below are
+# meaningful, but exclude the bench suite, alembic autogenerate output, and
+# PyInstaller entrypoints — they are either third-party-style, generated,
+# or platform-specific code where mypy adds no value at the moment.
+[tool.mypy]
+python_version = "3.13"
+explicit_package_bases = true
+namespace_packages = true
+ignore_missing_imports = false
+warn_unused_ignores = true
+warn_redundant_casts = true
+no_implicit_optional = true
+
+# Bench suite has its own pyproject and intentionally uses loose typing.
+[[tool.mypy.overrides]]
+module = "tests.vectorstore_bench.*"
+ignore_errors = true
+
+# Alembic versions are mostly generated. `op` is dynamically injected by
+# Alembic at runtime, so the static type is just `Any`.
+[[tool.mypy.overrides]]
+module = "alembic.*"
+ignore_errors = true
+
+# PyInstaller entrypoint — _MEIPASS is patched at runtime by the bootloader.
+[[tool.mypy.overrides]]
+module = "backend.run_backend"
+ignore_errors = true
+
+# `qrcode` ships without type stubs and there is no `types-qrcode` on PyPI.
+[[tool.mypy.overrides]]
+module = "qrcode"
+ignore_missing_imports = true
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes (unused imports, undefined names)
+    "I",    # isort (import ordering)
+    "N",    # pep8-naming
+    "W",    # pycodestyle warnings
+    "UP",   # pyupgrade (modern syntax)
+    "RUF",  # ruff-specific rules
+]
+ignore = [
+    "E501",  # line too long — handled by formatter
+    "N812",  # lowercase imported as non-lowercase
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[dependency-groups]
+dev = [
+    "pyinstaller>=6.20.0",
+    "ruff>=0.15.14",
+]
+# Isolated group for the Chroma vs Zvec benchmark under
+# tests/vectorstore_bench/. Install with:
+#   uv sync --group bench
+bench = [
+    "chromadb>=0.5.0",
+    "zvec>=0.5.0",
+    "httpx>=0.27.0",
+    "numpy>=1.26.0",
+]

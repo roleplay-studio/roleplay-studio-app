@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel in-flight runs for the same branch on new pushes — saves CI minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────
+  # Lint — fast gate. Runs on every PR. Fails before tests are even
+  # scheduled so contributors get formatting feedback in seconds.
+  # ─────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint (ruff + eslint + prettier)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Backend: ruff ──────────────────────────────────────────────
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Restore ruff cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ruff
+          key: ruff-${{ runner.os }}-${{ hashFiles('uv.lock', 'pyproject.toml') }}
+
+      - name: Run ruff check
+        run: uv run ruff check .
+
+      - name: Run ruff format --check
+        run: uv run ruff format --check .
+
+      # ── Frontend: eslint + prettier + svelte-check ────────────────
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run ESLint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Run Prettier --check
+        working-directory: frontend
+        run: npm run format
+
+      - name: Run svelte-check
+        working-directory: frontend
+        run: npm run check
+
+  # ─────────────────────────────────────────────────────────────────
+  # Test — full suite. Runs on push to main + manual dispatch.
+  # Backend tests are self-contained (mocks + in-memory DB) so they
+  # pass without an OpenRouter key.
+  # ─────────────────────────────────────────────────────────────────
+  test:
+    name: Test (pytest + vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: lint
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Backend: pytest ────────────────────────────────────────────
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.13
+
+      - name: Install backend deps
+        run: uv sync --extra test
+
+      - name: Run pytest
+        run: uv run pytest -v --tb=short
+
+      # ── Frontend: vitest ───────────────────────────────────────────
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run vitest
+        working-directory: frontend
+        run: npm run test

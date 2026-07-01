@@ -1,0 +1,25 @@
+#!/bin/bash
+# Pre-commit hook: validate Python code with Ruff
+# Installed via: git config core.hooksPath .githooks
+
+set -e
+
+echo "🔍 Running Ruff checks..."
+
+# Get staged Python files (excluding deleted ones)
+STAGED_PYTHON_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$' || true)
+
+if [ -z "$STAGED_PYTHON_FILES" ]; then
+    echo "   No Python files staged, skipping Ruff."
+    exit 0
+fi
+
+# Check with Ruff lint
+echo "   ruff check..."
+uv run ruff check $STAGED_PYTHON_FILES
+echo "   ✅ ruff check passed"
+
+# Check with Ruff format
+echo "   ruff format --check..."
+uv run ruff format --check $STAGED_PYTHON_FILES
+echo "   ✅ ruff format passed"
