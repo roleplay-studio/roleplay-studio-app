@@ -28,18 +28,93 @@ _STARTER_DIR_NAME = "bots_examples"
 _SUPPORTED_EXTS = {".json", ".png"}
 
 
-def _examples_dir() -> Path:
-    """Resolve the bots_examples dir for the current runtime.
+def _bundled_examples_dir() -> Path:
+    """Bundled starter-bots folder shipped with the project.
 
-    * Dev: project root (``/Users/.../streamlit-llm-roleplay/bots_examples/``)
+    Used as a fallback when ``<ROLEPLAY_DATA_DIR>/bots_examples`` is
+    missing or empty, so the setup wizard never shows an empty list
+    after a fresh install.
+
     * Frozen (PyInstaller): inside the ``_MEIPASS`` extraction dir
+      so the bundle ships pre-cooked.
+    * Dev: ``<project_root>/bots_examples`` (one parent up from
+      ``api/``). Anything that lives next to ``pyproject.toml`` is
+      reachable this way.
     """
     if getattr(sys, "frozen", False):
         base = Path(getattr(sys, "_MEIPASS", Path.cwd()))
     else:
-        # api/bots_registry.py → project root is two parents up
+        # api/bots_registry.py → project root is one parent up
         base = Path(__file__).resolve().parent.parent
     return base / _STARTER_DIR_NAME
+
+
+def _candidates() -> list[Path]:
+    """Return the candidate starter-bots directories in priority order.
+
+    The first directory that contains at least one supported card
+    (``*.json`` / ``*.png``) wins; later entries are tried only when
+    the earlier ones are missing or empty. This keeps the user-facing
+    experience deterministic:
+
+    * User-defined data (``STARTER_BOTS_DIR`` or
+      ``<ROLEPLAY_DATA_DIR>/bots_examples``) always takes precedence
+      when present.
+    * The bundled set is a safety net for fresh installs where the
+      data dir has no bots yet.
+
+    Order:
+
+    1. ``STARTER_BOTS_DIR`` (absolute path, or relative to the
+       data dir when one is set) — explicit per-deployment override.
+    2. ``<ROLEPLAY_DATA_DIR>/bots_examples`` — so a single
+       ``ROLEPLAY_DATA_DIR=demo`` env var covers DB, chroma, uploads,
+       AND starter bots.
+    3. Bundled (project root or ``_MEIPASS``).
+    """
+    import os
+
+    candidates: list[Path] = []
+
+    explicit = os.environ.get("STARTER_BOTS_DIR")
+    if explicit:
+        p = Path(explicit)
+        if not p.is_absolute():
+            data_dir = os.environ.get("ROLEPLAY_DATA_DIR")
+            if data_dir:
+                p = Path(data_dir) / p
+        candidates.append(p)
+
+    data_dir = os.environ.get("ROLEPLAY_DATA_DIR")
+    if data_dir:
+        candidates.append(Path(data_dir) / _STARTER_DIR_NAME)
+
+    candidates.append(_bundled_examples_dir())
+    return candidates
+
+
+def _has_supported_cards(directory: Path) -> bool:
+    """True when ``directory`` contains at least one ``.json``/``.png`` card."""
+    if not directory.is_dir():
+        return False
+    for path in directory.iterdir():
+        if path.suffix.lower() in _SUPPORTED_EXTS:
+            return True
+    return False
+
+
+def _resolve_examples_dir() -> Path:
+    """Pick the first non-empty candidate, or the last one if all are empty.
+
+    Returning the bundled (last) path on total miss keeps the wizard's
+    "no starter bots" rendering consistent regardless of which
+    directories exist.
+    """
+    candidates = _candidates()
+    for directory in candidates[:-1]:
+        if _has_supported_cards(directory):
+            return directory
+    return candidates[-1]
 
 
 def _placeholder_avatar_data_url(name: str) -> str:
@@ -58,7 +133,7 @@ def list_starter_bots() -> list[dict]:
     Bots that fail to parse are still listed with ``error`` set so the wizard
     can show the user a warning instead of silently hiding a broken card.
     """
-    examples_dir = _examples_dir()
+    examples_dir = _resolve_examples_dir()
     if not examples_dir.is_dir():
         return []
 

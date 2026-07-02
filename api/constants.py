@@ -4,13 +4,20 @@ import os
 from typing import Any
 
 # ── Uploads ──────────────────────────────────────────────────────────
+# UPLOADS_DIR is the folder that holds avatar files (one nested level
+# below the mount point, so the public URL stays ``/uploads/avatars/…``).
+# The folder itself is resolved from ``Settings.effective_upload_dir``
+# so the ``UPLOAD_DIR`` env var (see .env.example) controls where
+# avatars live in every environment. Relative values resolve against
+# ``ROLEPLAY_DATA_DIR`` when set, otherwise against the project root.
+from app.infrastructure.config import Settings
 
-UPLOADS_DIR = os.path.join(
-    os.path.dirname(__file__),
-    "..",
-    "uploads",
-    "avatars",
-)
+
+def _resolve_uploads_dir() -> str:
+    return str(Settings.from_env().effective_upload_dir / "avatars")
+
+
+UPLOADS_DIR = _resolve_uploads_dir()
 
 ALLOWED_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
 

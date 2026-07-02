@@ -80,8 +80,15 @@ def create_app() -> FastAPI:
     )
 
     # ── Static files: uploaded avatars ───────────────────────────
-    data_dir = os.environ.get("ROLEPLAY_DATA_DIR", os.path.join(os.path.dirname(__file__), ".."))
-    uploads_dir = os.path.join(data_dir, "uploads")
+    # The folder that backs the public ``/uploads/...`` URL is
+    # controlled by the ``UPLOAD_DIR`` env var (see .env.example).
+    # Relative values resolve against ``ROLEPLAY_DATA_DIR`` when set,
+    # otherwise the project root — same convention as the rest of
+    # Settings paths. ``effective_upload_dir`` is absolute.
+    from app.infrastructure.config import Settings
+
+    _settings = Settings.from_env()
+    uploads_dir = str(_settings.effective_upload_dir)
     os.makedirs(uploads_dir, exist_ok=True)
     app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 

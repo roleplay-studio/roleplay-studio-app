@@ -28,7 +28,12 @@ class ChromaKnowledgeBase:
 
     def __init__(self, persist_directory: str | None = None, settings: Settings | None = None):
         self.settings = settings or Settings.from_env()
-        self.persist_directory = persist_directory or self.settings.chroma_persist_dir
+        # ``effective_chroma_persist_dir`` is absolute; relative
+        # ``chroma_persist_dir`` from .env is resolved against the data
+        # dir at access time.
+        self.persist_directory = persist_directory or str(
+            self.settings.effective_chroma_persist_dir
+        )
         self._embeddings: HttpEmbeddings | None = None
         self._vectorstores: OrderedDict[int, Chroma] = OrderedDict()
         self._initialized: dict[int, bool] = {}
