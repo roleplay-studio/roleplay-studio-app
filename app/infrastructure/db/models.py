@@ -128,3 +128,28 @@ class UserPersona(SQLModel, table=True):
     description: str = Field(default="")
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+
+
+class AppSettings(SQLModel, table=True):
+    """Singleton settings table — at most one row with ``id=1``.
+
+    Holds runtime-only config that doesn't belong in ``.env``: lists,
+    JSON blobs, future feature toggles. The CheckConstraint on ``id``
+    (enforced in the alembic migration) is the belt; SQLModel
+    repositories treat ``id=1`` as the only valid row and use
+    ``synchronize_session=False`` upserts as suspenders.
+
+    Today the only stored value is the user-managed bot category
+    list. New columns can be added by separate migrations without
+    breaking the schema — existing rows just read ``NULL``/default.
+    """
+
+    __tablename__ = "app_settings"
+
+    id: int = Field(default=1, primary_key=True)
+    # JSON-encoded list[str]. Stored as TEXT to stay SQLite-friendly
+    # without pulling in a JSON column type that would block an
+    # eventual Postgres migration. ``serializer`` validates parse-ability
+    # on read in SettingsService.
+    bot_categories_json: str = Field(default="[]", nullable=False)
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))

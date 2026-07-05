@@ -108,6 +108,11 @@ export interface Bot {
   avatar_path: null | string;
   bot_type: BotType;
   categories: string[];
+  /** Categories that were saved on this bot but are no longer
+   *  defined in the user-managed list. The picker hides them; the
+   *  card surfaces them as a "stale" badge so the user can clean up.
+   *  Empty array when every category is currently valid. */
+  categories_invalid: string[];
   description: string;
   first_message: string;
   id: number;
@@ -309,12 +314,17 @@ export const api = {
       return r.json().catch(() => ({ partial_saved: false, was_active: false }));
     }),
 
+  addCategory: (name: string) =>
+    request<string[]>('/api/bots/categories', {
+      body: JSON.stringify({ name }),
+      method: 'POST',
+    }),
+
   addKnowledge: (botId: number, content: string) =>
     request<{ ok: boolean }>(`/api/knowledge/${botId}`, {
       body: JSON.stringify({ content }),
       method: 'POST',
     }),
-
   addKnowledgeFile: async (botId: number, file: File) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -328,6 +338,7 @@ export const api = {
     }
     return res.json() as Promise<{ chunk_count: number; file_name: string; status: string }>;
   },
+
   cancelReindex: (jobId: string) =>
     request<{ ok: boolean }>(`/api/config/knowledge/reindex/${jobId}/cancel`, { method: 'POST' }),
 
@@ -335,7 +346,6 @@ export const api = {
     request<{ ok: boolean }>(`/api/threads/${threadId}/messages/${messageId}/cascade`, {
       method: 'DELETE',
     }),
-
   // Categories
   categories: () => request<string[]>('/api/bots/categories'),
   clearThread: (id: number) =>
@@ -369,10 +379,12 @@ export const api = {
     request<{ ok: boolean }>(`/api/bots/${botId}/versions/${versionId}`, {
       method: 'DELETE',
     }),
-
+  deleteCategory: (name: string) =>
+    request<string[]>(`/api/bots/categories/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    }),
   deleteFile: (threadId: number, fileId: number) =>
     request<{ ok: boolean }>(`/api/threads/${threadId}/files/${fileId}`, { method: 'DELETE' }),
-
   deleteKnowledge: (botId: number, entryId: string) =>
     request<{ ok: boolean }>(`/api/knowledge/${botId}/${entryId}`, { method: 'DELETE' }),
 
@@ -381,8 +393,10 @@ export const api = {
       `/api/knowledge/${botId}/file/${encodeURIComponent(fileName)}`,
       { method: 'DELETE' },
     ),
+
   deleteLastMessage: (threadId: number) =>
     request<{ ok: boolean }>(`/api/threads/${threadId}/messages/last`, { method: 'DELETE' }),
+
   deleteMessage: (threadId: number, messageId: number) =>
     request<{ ok: boolean }>(`/api/threads/${threadId}/messages/${messageId}`, {
       method: 'DELETE',
@@ -441,10 +455,8 @@ export const api = {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   },
-
   findThreadByBotAndPersona: (botId: number, personaId: number) =>
     request<{ thread: null | Thread }>(`/api/bots/${botId}/threads/find?persona_id=${personaId}`),
-
   getBot: (id: number) => request<Bot>(`/api/bots/${id}`),
 
   getBotVersion: (botId: number, versionId: number) =>
@@ -452,9 +464,11 @@ export const api = {
 
   // Knowledge (RAG) — embedding model changes & reindex
   getKnowledgeStatus: () => request<KnowledgeStatusResponse>('/api/config/knowledge/status'),
+
   // Message versions
   getMessageVersions: (threadId: number, messageId: number) =>
     request<{ versions: Message[] }>(`/api/threads/${threadId}/messages/${messageId}/versions`),
+
   getPersona: (id: number) => request<Persona>(`/api/personas/${id}`),
   // Threads
   getThread: (id: number) => request<Thread>(`/api/threads/${id}`),
@@ -479,7 +493,6 @@ export const api = {
     }
     return res.json();
   },
-
   importChat: async (
     botId: number,
     file: File,
@@ -506,15 +519,14 @@ export const api = {
   },
   // Bots
   listBots: () => request<Bot[]>('/api/bots'),
+
   listBotThreads: (botId: number) => request<Thread[]>(`/api/bots/${botId}/threads`),
   // Bot versioning
   listBotVersions: (botId: number) => request<BotVersion[]>(`/api/bots/${botId}/versions`),
   listFilesForMessage: (threadId: number, messageId: number) =>
     request<ThreadFileDTO[]>(`/api/threads/${threadId}/messages/${messageId}/files`),
-
   // Knowledge
   listKnowledge: (botId: number) => request<KnowledgeEntry[]>(`/api/knowledge/${botId}`),
-
   // Pagination uses a keyset cursor: pass `beforeId` to load messages
   // older than that id. When `beforeId` is null the server returns the
   // newest page (current behaviour).
@@ -546,11 +558,23 @@ export const api = {
       method: 'POST',
     });
   },
+
   // Reindex
   reindexKnowledge: () =>
     request<{ detail: string; ok: boolean }>('/api/config/reindex', { method: 'POST' }),
+
+  renameCategory: (oldName: string, newName: string) =>
+    request<string[]>('/api/bots/categories/rename', {
+      body: JSON.stringify({ new_name: newName, old_name: oldName }),
+      method: 'POST',
+    }),
   renameThread: (id: number, name: string) =>
     request<{ ok: boolean }>(`/api/threads/${id}?name=${encodeURIComponent(name)}`, {
+      method: 'PUT',
+    }),
+  replaceCategories: (categories: string[]) =>
+    request<string[]>('/api/bots/categories', {
+      body: JSON.stringify({ categories }),
       method: 'PUT',
     }),
   restoreBotVersion: (botId: number, versionId: number) =>

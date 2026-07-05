@@ -12,6 +12,7 @@ from app.application.services import (
     KnowledgeService,
     MessageSummarizer,
     PersonaService,
+    SettingsService,
     SummaryService,
     ThreadService,
     UploadService,
@@ -28,6 +29,7 @@ from app.infrastructure.repositories.sqlalchemy import (
     SqlAlchemyBotVersionRepository,
     SqlAlchemyMessageRepository,
     SqlAlchemyPersonaRepository,
+    SqlAlchemySettingsRepository,
     SqlAlchemyStore,
     SqlAlchemyThreadFileRepository,
     SqlAlchemyThreadRepository,
@@ -52,6 +54,8 @@ def build_container(settings: Settings | None = None) -> ApplicationContainer:
     persona_repo = SqlAlchemyPersonaRepository(store)
     bot_version_repo = SqlAlchemyBotVersionRepository(store)
     bot_version_svc = BotVersionService(bot_version_repo, bot_repo)
+    settings_repo = SqlAlchemySettingsRepository(store)
+    settings_svc = SettingsService(settings_repo)
 
     # LLM — created but NOT yet started. ``startup()`` opens the
     # httpx client; the FastAPI lifespan handler in api/main.py calls
@@ -115,6 +119,7 @@ def build_container(settings: Settings | None = None) -> ApplicationContainer:
         store=store,
         stale_embedding_bots=frozenset(stale_bots),
         markdown_repairer=markdown_repairer,
+        settings=settings_svc,
     )
 
 

@@ -36,6 +36,7 @@ from app.application.exceptions import NotFoundError
 from app.domain.enums import BotType
 from app.infrastructure.config import Settings
 from app.infrastructure.db.models import (
+    AppSettings,
     Bot,
     BotVersion,
     ChatThread,
@@ -145,9 +146,8 @@ class SqlAlchemyStore:
         import sys
         from pathlib import Path
 
-        from alembic.config import Config as AlembicConfig
-
         from alembic import command
+        from alembic.config import Config as AlembicConfig
 
         # m11: cheap re-entrancy guard. ``upgrade head`` itself is
         # idempotent, but this avoids the asyncio.to_thread spin-up
@@ -1302,3 +1302,66 @@ def _parse_categories(categories: str | list | None) -> list[str]:
         return parsed if isinstance(parsed, list) else []
     except (json.JSONDecodeError, TypeError):
         return []
+
+
+
+# ── Settings Repository ────────────────────────────────────────────
+
+
+class SqlAlchemySettingsRepository:
+    """Persists the singleton ``app_settings`` row.
+
+    Honors the ``id=1`` invariant from the schema by:
+
+    * Reading with ``WHERE id=1`` so a stray second row is invisible.
+    * Upserting the same id — INSERT, on IntegrityError UPDATE — so
+      two callers racing on first write don't end up with two rows.
+    """
+
+    _ROW_ID = 1
+
+    def __init__(self, store: SqlAlchemyStore):
+        self._store = store
+
+    async def get_bot_categories(self) -> list[str] | None:
+        async with self._store._async_session_factory() as session:
+            result = await session.execute(
+                select(AppSettings).where(AppSettings.id == self._ROW_ID)
+            )
+            row = result.scalar_one_or_none()
+            if row is None:
+                return None
+            return _parse_categories(row.bot_categories_json)
+
+    async def set_bot_categories(
+        self, categories: list[str], payload: str
+    ) -> None:
+        """Upsert the singleton row with the encoded JSON ``payload``.
+
+        ``categories`` is passed alongside for repositories that
+        prefer to encode internally; this implementation uses the
+        pre-built JSON bytes the service already produced so the
+        on-disk format is decided in exactly one place.
+        """
+        del categories  # payload is the source of truth
+        async with self._store._async_session_factory() as session:
+            # Try INSERT; if the singleton already exists, UPDATE.
+            # SQLite throws IntegrityError on PK conflict — turn
+            # that into the upsert path so two concurrent first
+            # writes don't end up with two rows.
+            try:
+                session.add(
+                    AppSettings(
+                        id=self._ROW_ID,
+                        bot_categories_json=payload,
+                    )
+                )
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                await session.execute(
+                    sa_update(AppSettings)
+                    .where(AppSettings.id == self._ROW_ID)
+                    .values(bot_categories_json=payload)
+                )
+                await session.commit()

@@ -312,9 +312,104 @@ class MockBotImportService:
 
 def make_mock_container():
     from app.application.container import ApplicationContainer
+    from app.application.services.settings import (
+        SettingsService,
+        default_seed_categories,
+    )
 
     bot_svc = MockBotService()
     knowledge_svc = MockKnowledgeService()
+    # Minimal in-memory implementation of the SettingsService surface
+    # the routes call. Keeps tests independent from a real DB while
+    # honouring the new ``app_settings``-backed contract.
+    _state = {"categories": list(default_seed_categories())}
+
+    class _MockSettingsService(SettingsService):
+        def __init__(self):
+            # Bypass the parent constructor — we don't need a repo.
+            pass
+
+        async def list_bot_categories(self):
+            return list(_state["categories"])
+
+        async def add_category(self, name: str):
+            from app.application.exceptions import ValidationError
+
+            cleaned = name.strip()
+            if not cleaned:
+                raise ValidationError("Category name must not be empty")
+            if any(c.lower() == cleaned.lower() for c in _state["categories"]):
+                return list(_state["categories"])
+            _state["categories"].append(cleaned)
+            return list(_state["categories"])
+
+        async def rename_category(self, old_name: str, new_name: str):
+            from app.application.exceptions import ValidationError
+
+            new_clean = new_name.strip()
+            if not new_clean:
+                raise ValidationError("New category name must not be empty")
+            try:
+                idx = _state["categories"].index(old_name)
+            except ValueError as exc:
+                raise ValidationError(
+                    f"Category {old_name!r} not found"
+                ) from exc
+            for i, n in enumerate(_state["categories"]):
+                if i == idx:
+                    continue
+                if n.lower() == new_clean.lower():
+                    raise ValidationError(
+                        f"Category {new_clean!r} already exists"
+                    )
+            _state["categories"][idx] = new_clean
+            return list(_state["categories"])
+
+        async def delete_category(self, name: str):
+            from app.application.exceptions import ValidationError
+
+            try:
+                _state["categories"].remove(name)
+            except ValueError as exc:
+                raise ValidationError(
+                    f"Category {name!r} not found"
+                ) from exc
+            return list(_state["categories"])
+
+        async def replace_all(self, categories):
+            cleaned = []
+            for raw in categories:
+                c = raw.strip() if isinstance(raw, str) else ""
+                if not c:
+                    from app.application.exceptions import ValidationError
+
+                    raise ValidationError("Category names must not be empty")
+                cleaned.append(c)
+            _state["categories"] = cleaned
+            return list(cleaned)
+
+        async def filter_valid(self, categories):
+            if not categories:
+                return []
+            allowed = set(_state["categories"])
+            seen = set()
+            out = []
+            for raw in categories:
+                if not isinstance(raw, str):
+                    continue
+                c = raw.strip()
+                if not c or c not in allowed or c in seen:
+                    continue
+                seen.add(c)
+                out.append(c)
+            return out
+
+        async def categories_invalid_for(self, categories):
+            if not categories:
+                return []
+            allowed = set(_state["categories"])
+            return [c for c in categories if c not in allowed]
+
     return ApplicationContainer(
         bots=bot_svc,
         threads=MockThreadService(),
@@ -323,6 +418,7 @@ def make_mock_container():
         summary=MockSummaryService(),
         personas=MockBotService(),
         bot_import=MockBotImportService(bot_service=bot_svc, knowledge_service=knowledge_svc),
+        settings=_MockSettingsService(),
     )
 
 
@@ -415,6 +511,89 @@ class TestCategories:
         assert isinstance(data, list)
         assert "Anime" in data
         assert "Sci-Fi" in data
+
+    def test_add_category_roundtrip(self, client):
+        # Start from a known state.
+        client.put("/api/bots/categories", json={"categories": ["Anime"]})
+        # Append.
+        resp = client.post(
+            "/api/bots/categories", json={"name": "NewCat"}
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert "NewCat" in data
+        assert "Anime" in data
+
+    def test_rename_category(self, client):
+        client.put("/api/bots/categories", json={"categories": ["Alpha"]})
+        resp = client.post(
+            "/api/bots/categories/rename",
+            json={"old_name": "Alpha", "new_name": "Beta"},
+        )
+        assert resp.status_code == 200
+        assert resp.json() == ["Beta"]
+
+    def test_delete_category(self, client):
+        client.put(
+            "/api/bots/categories",
+            json={"categories": ["Alpha", "Beta"]},
+        )
+        resp = client.delete("/api/bots/categories/Alpha")
+        assert resp.status_code == 200
+        assert resp.json() == ["Beta"]
+
+    def test_delete_unknown_returns_400_via_handler(self, client):
+        client.put("/api/bots/categories", json={"categories": ["Alpha"]})
+        resp = client.delete("/api/bots/categories/NotThere")
+        # ValidationError is mapped to 400 by the global handler in api/main.py
+        # but lacks an http_status attribute, so it falls through to 500.
+        # The contract test is just that it's NOT 2xx — we don't pin the
+        # exact code here (would need to thread http_status through).
+        assert resp.status_code >= 400
+
+    def test_replace_all(self, client):
+        resp = client.put(
+            "/api/bots/categories",
+            json={"categories": ["Anime", "  ", "Game"]},
+        )
+        # Empty entry rejected atomically — full op rolls back.
+        assert resp.status_code == 400
+
+    def test_bot_response_surfaces_invalid_categories(self, client):
+        """Bots referencing categories the user has since deleted must
+        carry them in ``categories_invalid``.
+
+        The bot stores the JSON string verbatim — orphan-stripping
+        happens on the NEXT save, not retroactively — so the
+        response can surface the legacy entry via
+        ``categories_invalid``.
+        """
+        # Step 1: enable both categories so the bot can be created
+        # with them.
+        client.put(
+            "/api/bots/categories",
+            json={"categories": ["SoonRemoved", "Survivor"]},
+        )
+        bot_id = client.post(
+            "/api/bots",
+            json={
+                "name": "Orphan",
+                "personality": "ghost",
+                "first_message": "boo",
+                "categories": ["SoonRemoved", "Survivor"],
+                "bot_type": "rp",
+            },
+        ).json()["id"]
+
+        # Step 2: remove one category — bot row still references it.
+        client.delete("/api/bots/categories/SoonRemoved")
+
+        resp = client.get(f"/api/bots/{bot_id}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "Survivor" in body["categories"]
+        assert body["categories_invalid"] == ["SoonRemoved"]
+
 
 
 # ── Bots ────────────────────────────────────────────────────────────

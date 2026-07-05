@@ -30,6 +30,30 @@ if TYPE_CHECKING:
     from app.infrastructure.db.models import Bot, BotVersion
 
 
+class SettingsRepository(Protocol):
+    """Read/write the ``app_settings`` singleton table.
+
+    Methods are narrow on purpose: the service layer handles
+    JSON encoding, seeding, and validation; this port only
+    persists what the service hands it.
+    """
+
+    async def get_bot_categories(self) -> list[str] | None:
+        """Return the persisted category list, or ``None`` if the
+        singleton row hasn't been created yet (caller should seed)."""
+        ...
+
+    async def set_bot_categories(
+        self, categories: list[str], payload: str
+    ) -> None:
+        """Persist ``payload`` (already JSON-encoded) as the new
+        ``bot_categories_json``. ``categories`` is passed alongside
+        for repositories that prefer to encode internally; callers
+        MUST keep both in sync.
+        """
+        ...
+
+
 class BotVersionRepository(Protocol):
     async def add(self, version: BotVersion) -> int: ...
 

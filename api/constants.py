@@ -1,6 +1,5 @@
 """Shared API constants — languages, providers, upload settings."""
 
-import os
 from typing import Any
 
 # ── Uploads ──────────────────────────────────────────────────────────
