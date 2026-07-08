@@ -29,11 +29,11 @@ async def get_config():
     environment = os.getenv("ENVIRONMENT", "production")
     debug_env = os.getenv("DEBUG", "")
     return {
-        "openrouter_base_url": settings.openrouter_base_url,
+        "llm_base_url": settings.llm_base_url,
         "chat_model": settings.chat_model,
         "fast_model": settings.fast_model,
         "embedding_model": settings.embedding_model,
-        "embedding_base_url": settings.effective_embedding_base_url,  # M13: with openrouter fallback
+        "embedding_base_url": settings.effective_embedding_base_url,  # M13: with LLM fallback
         "embedding_api_key_configured": settings.embedding_api_key
         is not None,  # NEW (bool, no key leak)
         "default_temperature": settings.default_temperature,
@@ -44,7 +44,7 @@ async def get_config():
         "language": getattr(settings, "language", "en"),
         "theme": getattr(settings, "theme", "system"),
         "knowledge_relevance_threshold": settings.knowledge_relevance_threshold,
-        "api_key_configured": settings.openrouter_api_key is not None,
+        "api_key_configured": settings.llm_api_key is not None,
         "summarize_enabled": settings.summarize_enabled,
         "summarize_max_tokens": settings.summarize_max_tokens,
         "summarize_min_length": settings.summarize_min_length,

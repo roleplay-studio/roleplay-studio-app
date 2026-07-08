@@ -62,7 +62,7 @@ class ChromaKnowledgeBase:
         raw_key = self.settings.embedding_api_key
         key_str = raw_key.get_secret_value() if raw_key is not None else ""
         key_hash = hashlib.sha256(key_str.encode()).hexdigest()[:16]
-        # M13: use the effective URL (with openrouter fallback) so the
+        # M13: use the effective URL (with LLM fallback) so the
         # fingerprint matches the URL the embedding client actually
         # hits.
         raw = (

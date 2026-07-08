@@ -32,7 +32,7 @@ async def list_providers():
 async def setup_status(container: ContainerDep):
     """Check if initial setup is needed."""
     settings = Settings.from_env()
-    needs_api_key = settings.openrouter_api_key is None
+    needs_api_key = settings.llm_api_key is None
 
     bots = await container.bots.list_bots()
     needs_bot = len(bots) == 0
@@ -64,17 +64,17 @@ async def setup_configure(body: ConfigureRequest, container: ContainerDep):
     # Apply to env file using dotenv helpers
     set_key(str(env_path), "LLM_PROVIDER", provider)
     if base_url:
-        set_key(str(env_path), "OPENROUTER_BASE_URL", base_url)
+        set_key(str(env_path), "LLM_BASE_URL", base_url)
     if api_key:
-        set_key(str(env_path), "OPENROUTER_API_KEY", api_key)
+        set_key(str(env_path), "LLM_API_KEY", api_key)
     if model:
         set_key(str(env_path), "CHAT_MODEL", model)
 
     # Apply to current process
     env_vars = [
         ("LLM_PROVIDER", provider),
-        ("OPENROUTER_BASE_URL", base_url),
-        ("OPENROUTER_API_KEY", api_key),
+        ("LLM_BASE_URL", base_url),
+        ("LLM_API_KEY", api_key),
         ("CHAT_MODEL", model),
     ]
     for k, v in env_vars:
@@ -82,7 +82,7 @@ async def setup_configure(body: ConfigureRequest, container: ContainerDep):
             os.environ[k] = v
     # If no key and provider doesn't need one, ensure key is cleared
     if not PROVIDERS.get(provider, {}).get("needs_key", True):
-        os.environ.pop("OPENROUTER_API_KEY", None)
+        os.environ.pop("LLM_API_KEY", None)
 
     # Bot creation happens through POST /import-bots (selected by the user
     # on the last wizard step). /configure only persists provider + env,

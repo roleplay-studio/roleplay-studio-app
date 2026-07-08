@@ -92,7 +92,7 @@ export interface AppConfig {
   history_limit: number;
   knowledge_relevance_threshold: number;
   language: string;
-  openrouter_base_url: string;
+  llm_base_url: string;
   summarize_enabled: boolean;
   summarize_max_tokens: number;
   summarize_min_length: number;

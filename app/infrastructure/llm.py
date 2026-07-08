@@ -162,14 +162,14 @@ class OpenRouterLLM:
         # 1) explicit ``api_key`` kwarg (used by tests and the
         #    bootstrap path that builds a per-model LLM with the
         #    fast_model override)
-        # 2) ``settings.openrouter_api_key`` (SecretStr wrapper)
+        # 2) ``settings.llm_api_key`` (SecretStr wrapper)
         # 3) empty string → the "no key configured" sentinel
         # The previous ``or ""`` chain worked for plain ``str | None``
         # but a SecretStr is always truthy — we now unwrap explicitly.
         if api_key is not None:
             self.api_key = api_key
-        elif self.settings.openrouter_api_key is not None:
-            self.api_key = self.settings.openrouter_api_key.get_secret_value()
+        elif self.settings.llm_api_key is not None:
+            self.api_key = self.settings.llm_api_key.get_secret_value()
         else:
             self.api_key = ""
         # ``sk-no-...ired`` is the historical "no key set" marker. It
@@ -245,7 +245,7 @@ class OpenRouterLLM:
 
     @property
     def _base_url(self) -> str:
-        return self.settings.openrouter_base_url.rstrip("/")
+        return self.settings.llm_base_url.rstrip("/")
 
     @property
     def _model(self) -> str:

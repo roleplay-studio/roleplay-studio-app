@@ -104,10 +104,10 @@ uv sync
 # Фронтенд + Tauri
 cd frontend && npm install && cd ..
 
-# Создать .env и прописать ключ
+# Create .env and put your key in
 cat > .env <<EOF
-OPENROUTER_API_KEY=sk-or-...xxxx
-OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+LLM_API_KEY=sk-or-...xxxx
+LLM_BASE_URL=https://openrouter.ai/api/v1
 CHAT_MODEL=openai/gpt-oss-20b
 EMBEDDING_MODEL=qwen/qwen3-embedding-8b
 EOF
@@ -274,7 +274,7 @@ api            — FastAPI роуты + DI через `app.deps`
 │
 ├── pyproject.toml                # Python deps + ruff + pytest
 ├── alembic.ini
-└── .env                          # OPENROUTER_API_KEY etc.
+└── .env                          # LLM_API_KEY и т.п.
 ```
 
 ---
@@ -346,8 +346,8 @@ npm run format        # prettier --check
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `OPENROUTER_API_KEY` | Yes | — | API ключ для OpenRouter / OpenAI-compat |
-| `OPENROUTER_BASE_URL` | No | `https://openrouter.ai/api/v1` | Базовый URL |
+| `LLM_API_KEY` | Yes | — | API ключ для OpenRouter / OpenAI-compat |
+| `LLM_BASE_URL` | No | `https://openrouter.ai/api/v1` | Базовый URL |
 | `CHAT_MODEL` | No | `openai/gpt-oss-20b` | Модель для чата |
 | `FAST_MODEL` | No | `openai/gpt-4o-mini` | Дешёвая модель для суммаризации |
 | `EMBEDDING_MODEL` | No | `qwen/qwen3-embedding-8b` | Модель эмбеддингов; `""` отключает RAG |

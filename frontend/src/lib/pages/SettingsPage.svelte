@@ -209,7 +209,7 @@
       providers = provs;
       languages = langs;
       editProvider = 'openrouter';
-      editBaseUrl = cfg.openrouter_base_url;
+      editBaseUrl = cfg.llm_base_url;
       editModel = cfg.chat_model;
       editTemperature = cfg.default_temperature;
       editMaxTokens = cfg.default_max_tokens;
@@ -1070,7 +1070,7 @@
               </div>
               <div class="config-row">
                 <div class="config-key">Base URL</div>
-                <code class="config-code">{config!.openrouter_base_url}</code>
+                <code class="config-code">{config!.llm_base_url}</code>
               </div>
               <div class="config-row">
                 <div class="config-key">Temperature</div>

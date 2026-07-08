@@ -30,16 +30,18 @@ def _describe_error(exc: BaseException) -> str:
     prefixes the type, walks the ``__cause__`` chain to surface the
     underlying ``OSError`` (which still carries ``[Errno N] reason``
     on POSIX), and — when we know we're talking to an LLM provider —
-    appends the configured ``OPENROUTER_BASE_URL`` so the user can
+    appends the configured ``LLM_BASE_URL`` so the user can
     sanity-check the configured endpoint from the chat UI alone.
     """
     type_name = type(exc).__name__
     parts: list[str] = [type_name]
     parts.append(str(exc) or repr(exc))
 
-    # Walk the cause chain looking for the deepest OSError — that's
-    # where ``[Errno 61] Connection refused`` and friends live, and
-    # they're far more diagnostic than the wrapper's generic text.
+    # Walking the cause chain looking for the deepest OSError — that's
+        # where ``[Errno 61] Connection refused`` and friends live, and
+        # they're far more diagnostic than the wrapper's generic text.
+        # We also append the configured ``LLM_BASE_URL`` so the user can
+        # sanity-check the configured endpoint from the chat UI alone.
     seen: set[int] = set()
     cur: BaseException | None = exc
     while cur is not None and id(cur) not in seen:
@@ -53,7 +55,7 @@ def _describe_error(exc: BaseException) -> str:
     try:
         from app.infrastructure.config import Settings
 
-        base = Settings.from_env().openrouter_base_url
+        base = Settings.from_env().llm_base_url
         if base:
             detail = f"{detail} (target: {base})"
     except Exception:
