@@ -93,3 +93,30 @@ class ImportBotRequest(BaseModel):
     categories: list[str] = Field(default_factory=list)
     bot_type: str = "rp"
     knowledge: list[str] | None = None
+
+
+# ── Settings / Categories ─────────────────────────────────────────
+
+
+class CategoryAddRequest(BaseModel):
+    """Add a new category to the user-managed list."""
+
+    name: str = Field(min_length=1)
+
+
+class CategoryRenameRequest(BaseModel):
+    """Rename a category in place (preserves order, matches by old name)."""
+
+    old_name: str = Field(min_length=1)
+    new_name: str = Field(min_length=1)
+
+
+class CategoryReplaceRequest(BaseModel):
+    """Replace the whole category list atomically (used by drag-reorder).
+
+    Validated by ``SettingsService.replace_all`` — duplicates and
+    empty entries raise ``ValidationError`` which the global handler
+    maps to 400.
+    """
+
+    categories: list[str] = Field(default_factory=list)

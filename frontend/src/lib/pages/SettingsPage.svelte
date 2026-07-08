@@ -8,6 +8,7 @@
     reindexEventSource as openReindexStream,
     type ReindexJobState,
   } from '../api';
+  import CategoryManager from '../CategoryManager.svelte';
   import { currentLang, t } from '../i18n';
   import { applyThemePreference, getThemePreference, resolveTheme } from '../theme';
   import { Input, Loading, Modal, Select, Toggle } from '../ui';
@@ -1000,6 +1001,12 @@
                 Always light, regardless of system
               {/if}
             </p>
+
+            <div class="section-divider"></div>
+            <h3 class="subsection-title">
+              {t('settings.categories.title', lang)}
+            </h3>
+            <CategoryManager />
           </div>
         </section>
       {/if}

@@ -20,6 +20,49 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _describe_error(exc: BaseException) -> str:
+    """Render an exception as a user-facing detail string.
+
+    The default ``str(exc)`` is useless for the most common failure
+    modes — ``httpx.ConnectError("All connection attempts failed")``
+    hides both the target host and the OS-level errno that tells you
+    whether it was refused, timed out, or unreachable. This helper
+    prefixes the type, walks the ``__cause__`` chain to surface the
+    underlying ``OSError`` (which still carries ``[Errno N] reason``
+    on POSIX), and — when we know we're talking to an LLM provider —
+    appends the configured ``OPENROUTER_BASE_URL`` so the user can
+    sanity-check the configured endpoint from the chat UI alone.
+    """
+    type_name = type(exc).__name__
+    parts: list[str] = [type_name]
+    parts.append(str(exc) or repr(exc))
+
+    # Walk the cause chain looking for the deepest OSError — that's
+    # where ``[Errno 61] Connection refused`` and friends live, and
+    # they're far more diagnostic than the wrapper's generic text.
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if isinstance(cur, OSError) and cur is not exc:
+            parts.append(f"({type(cur).__name__}: {cur})")
+            break
+        cur = cur.__cause__ or cur.__context__
+
+    detail = ": ".join(parts)
+    try:
+        from app.infrastructure.config import Settings
+
+        base = Settings.from_env().openrouter_base_url
+        if base:
+            detail = f"{detail} (target: {base})"
+    except Exception:
+        # Settings may be unavailable during very early startup; the
+        # error itself is still informative without the target URL.
+        pass
+    return detail
+
+
 def _format_chat_chunk_event(item: Any) -> str:
     """Render a single stream chunk as one or more ``data: ...\\n\\n`` SSE lines.
 
@@ -130,6 +173,28 @@ async def send_message(
     # can cancel it. The route's job is just to drain the queue into SSE.
     _stream_task, chunk_queue = container.chat.start_stream(command)
 
+    # DEBUG-mode observability — log the full SSE lifecycle so an
+    # operator debugging a "[Errno 61] Connection refused" type
+    # failure has the URL, model, and exception class on disk without
+    # having to attach a debugger. We check DEBUG at request time
+    # (not at module import) so a long-running dev server picks up
+    # env changes on the next request — and we avoid an import-time
+    # Settings read which would deadlock during Settings boot.
+    import os as _os
+
+    _debug_logging = _os.getenv("DEBUG", "").lower() in ("true", "1", "yes")
+    if _debug_logging:
+        logger.info(
+            "chat.stream.start",
+            extra={
+                "thread_id": thread_id,
+                "bot_id": body.bot_id,
+                "persona_id": body.persona_id,
+                "user_input_len": len(body.user_input),
+                "file_count": len(body.file_ids or []),
+            },
+        )
+
     async def event_stream():
         try:
             yield f"data: {json.dumps({'type': 'meta', 'thread_id': thread_id})}\n\n"
@@ -145,7 +210,18 @@ async def send_message(
                 if item is None:
                     break
                 if isinstance(item, BaseException):
-                    yield f"data: {json.dumps({'type': 'error', 'detail': str(item)})}\n\n"
+                    if _debug_logging:
+                        # Log full traceback — when a network blip
+                        # hits, the SSE error event has the type
+                        # and errno but not the file:line of the
+                        # raise site, which is what makes the
+                        # difference between "the user's key is bad"
+                        # and "DNS for openrouter.ai is broken".
+                        logger.exception(
+                            "chat.stream.chunk_error",
+                            extra={"thread_id": thread_id},
+                        )
+                    yield f"data: {json.dumps({'type': 'error', 'detail': _describe_error(item)})}\n\n"
                     break
                 # Reasoning (chain-of-thought), content, and dev-mode
                 # token usage are forwarded as independent SSE events so
@@ -158,9 +234,9 @@ async def send_message(
             if not await request.is_disconnected():
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
         except NotFoundError as exc:
-            yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'detail': _describe_error(exc)})}\n\n"
         except Exception as exc:
-            yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'detail': _describe_error(exc)})}\n\n"
         finally:
             # M-review2: guarantee the LLM task is cancelled even on
             # unexpected exceptions or ASGI-driven generator close,
@@ -200,6 +276,23 @@ async def regenerate_message(
         thread_id, message_id, body.bot_id, body.persona_id
     )
 
+    # DEBUG-mode observability — same rationale as in send_message:
+    # dump the full traceback to disk when the LLM stream fails so
+    # the operator doesn't have to attach a debugger.
+    import os as _os
+
+    _debug_logging = _os.getenv("DEBUG", "").lower() in ("true", "1", "yes")
+    if _debug_logging:
+        logger.info(
+            "chat.regenerate.start",
+            extra={
+                "thread_id": thread_id,
+                "message_id": message_id,
+                "bot_id": body.bot_id,
+                "persona_id": body.persona_id,
+            },
+        )
+
     async def event_stream():
         try:
             while True:
@@ -211,13 +304,24 @@ async def regenerate_message(
                 if item is None:
                     break
                 if isinstance(item, BaseException):
-                    yield f"data: {json.dumps({'type': 'error', 'detail': str(item)})}\n\n"
+                    if _debug_logging:
+                        # Log full traceback — when a network blip
+                        # hits, the SSE error event has the type
+                        # and errno but not the file:line of the
+                        # raise site, which is what makes the
+                        # difference between "the user's key is bad"
+                        # and "DNS for openrouter.ai is broken".
+                        logger.exception(
+                            "chat.stream.chunk_error",
+                            extra={"thread_id": thread_id},
+                        )
+                    yield f"data: {json.dumps({'type': 'error', 'detail': _describe_error(item)})}\n\n"
                     break
                 yield f"data: {json.dumps(item)}\n\n"
         except NotFoundError as exc:
-            yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'detail': _describe_error(exc)})}\n\n"
         except Exception as exc:
-            yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'detail': _describe_error(exc)})}\n\n"
         finally:
             # M-review2: pair with the early-disconnect cancel above
             # so the producer never outlives the SSE consumer.
@@ -263,9 +367,9 @@ async def retry_message(
                     break
                 yield f"data: {json.dumps(event)}\n\n"
         except NotFoundError as exc:
-            yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'detail': _describe_error(exc)})}\n\n"
         except Exception as exc:
-            yield f"data: {json.dumps({'type': 'error', 'detail': str(exc)})}\n\n"
+            yield f"data: {json.dumps({'type': 'error', 'detail': _describe_error(exc)})}\n\n"
 
     return StreamingResponse(
         event_stream(),

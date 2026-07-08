@@ -16,10 +16,15 @@ from pydantic import BaseModel
 
 from api.constants import ALLOWED_EXTENSIONS, UPLOADS_DIR
 from api.deps import ContainerDep
-from api.schemas import ImportBotRequest, UpdateBotRequest
+from api.schemas import (
+    CategoryAddRequest,
+    CategoryRenameRequest,
+    CategoryReplaceRequest,
+    ImportBotRequest,
+    UpdateBotRequest,
+)
 from api.upload_utils import read_upload_file_limited, save_upload_file_limited
 from app.application.dto import (
-    BOT_CATEGORIES,
     AddKnowledgeEntryCommand,
     BotResponse,
     BotVersionDTO,
@@ -44,10 +49,53 @@ _IMPORT_EXTS = {".json", ".png", ".webp", ".jpg", ".jpeg"}
 # ── Categories ───────────────────────────────────────────────────────
 
 
+def _require_settings(container):
+    """The SettingsService must always be wired up, but the route
+    layer treats a misconfigured container as a 503 — the rest of the
+    app would already be unusable without it (see api/main.py)."""
+    svc = getattr(container, "settings", None)
+    if svc is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Settings service unavailable",
+        )
+    return svc
+
+
 @router.get("/categories", response_model=list[str])
-async def list_categories():
-    """Get the list of predefined bot categories."""
-    return BOT_CATEGORIES
+async def list_categories(container: ContainerDep):
+    """Return the user-managed bot category list (seeded on first read)."""
+    svc = _require_settings(container)
+    return await svc.list_bot_categories()
+
+
+@router.post("/categories", response_model=list[str], status_code=status.HTTP_201_CREATED)
+async def add_category(body: CategoryAddRequest, container: ContainerDep):
+    """Append a new category, deduping against existing entries."""
+    svc = _require_settings(container)
+    return await svc.add_category(body.name)
+
+
+@router.post("/categories/rename", response_model=list[str])
+async def rename_category(body: CategoryRenameRequest, container: ContainerDep):
+    """Rename a category in place. Order-preserving."""
+    svc = _require_settings(container)
+    return await svc.rename_category(body.old_name, body.new_name)
+
+
+@router.delete("/categories/{name}", response_model=list[str])
+async def delete_category(name: str, container: ContainerDep):
+    """Remove a category. Bots that referenced it keep the legacy
+    string (the picker hides it; ``categories_invalid`` surfaces it)."""
+    svc = _require_settings(container)
+    return await svc.delete_category(name)
+
+
+@router.put("/categories", response_model=list[str])
+async def replace_categories(body: CategoryReplaceRequest, container: ContainerDep):
+    """Atomically replace the whole category list."""
+    svc = _require_settings(container)
+    return await svc.replace_all(body.categories)
 
 
 # ── Upload (must be before /{bot_id} to avoid route conflicts) ──────
@@ -90,13 +138,34 @@ async def upload_avatar(file: UploadFile = File(...)):
 
 @router.get("", response_model=list[BotResponse])
 async def list_bots(container: ContainerDep):
-    """List all bots with thread counts."""
+    """List all bots with thread counts.
+
+    Each bot response carries ``categories_invalid`` (categories
+    that were removed from the user-managed list) so the UI can
+    highlight "stale" chips instead of silently hiding them.
+    """
     bots_with_counts = await container.bots.list_bots_with_counts()
-    return [BotResponse.from_orm_bot(bot, count) for bot, count in bots_with_counts]
+    settings_svc = getattr(container, "settings", None)
+    valid_categories = (
+        set(await settings_svc.list_bot_categories())
+        if settings_svc is not None
+        else None
+    )
+    return [
+        BotResponse.from_orm_bot(bot, count, valid_categories=valid_categories)
+        for bot, count in bots_with_counts
+    ]
 
 
 @router.post("", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def create_bot(command: CreateBotCommand, container: ContainerDep):
+    # Filter the user-supplied category list against the current
+    # managed catalog so ``Bot.categories`` never holds a name that's
+    # been removed. Returns silently — picker hides unknowns anyway,
+    # but persisting them makes the "stale" list grow unboundedly.
+    settings_svc = getattr(container, "settings", None)
+    if settings_svc is not None:
+        command.categories = await settings_svc.filter_valid(command.categories)
     bot_id = await container.bots.create_bot(command)
     return {"id": bot_id}
 
@@ -105,7 +174,15 @@ async def create_bot(command: CreateBotCommand, container: ContainerDep):
 async def get_bot(bot_id: int, container: ContainerDep):
     try:
         bot, thread_count = await container.bots.get_bot_with_count(bot_id)
-        return BotResponse.from_orm_bot(bot, thread_count)
+        settings_svc = getattr(container, "settings", None)
+        valid = (
+            set(await settings_svc.list_bot_categories())
+            if settings_svc is not None
+            else None
+        )
+        return BotResponse.from_orm_bot(
+            bot, thread_count, valid_categories=valid
+        )
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
 
@@ -113,6 +190,11 @@ async def get_bot(bot_id: int, container: ContainerDep):
 @router.put("/{bot_id}")
 async def update_bot(bot_id: int, body: UpdateBotRequest, container: ContainerDep):
     try:
+        # Same orphan-stripping on update — never persist a category
+        # that's been deleted since the bot was created or last edited.
+        settings_svc = getattr(container, "settings", None)
+        if settings_svc is not None:
+            body.categories = await settings_svc.filter_valid(body.categories)
         command = UpdateBotCommand(
             bot_id=bot_id,
             name=body.name,
@@ -333,6 +415,12 @@ async def _import_from_json(content: bytes, container: ContainerDep) -> dict:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid JSON: {exc}",
         )
+    # Same orphan-stripping as create/update — an imported character
+    # card may carry categories the local user has since deleted.
+    settings_svc = getattr(container, "settings", None)
+    cats = body.categories
+    if settings_svc is not None:
+        cats = await settings_svc.filter_valid(cats)
     command = CreateBotCommand(
         name=body.name.strip(),
         personality=body.personality.strip(),
@@ -340,7 +428,7 @@ async def _import_from_json(content: bytes, container: ContainerDep) -> dict:
         scenario=body.scenario,
         description=body.description,
         avatar_path=body.avatar,
-        categories=body.categories,
+        categories=cats,
         bot_type=body.bot_type,
         alternate_greetings=getattr(body, "alternate_greetings", []) or [],
         mes_example=getattr(body, "mes_example", "") or "",

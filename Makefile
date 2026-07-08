@@ -166,6 +166,10 @@ build: ## Build production artifacts (frontend + backend)
 # spaces in the bundle name are kept verbatim (Tauri does the same).
 TAURI_DMG_PATH := frontend/src-tauri/target/release/bundle/dmg/Roleplay Studio_0.1.0_aarch64.dmg
 
+.PHONY: build-dmg
+build-dmg:
+	cd frontend && $(NPM) run tauri build
+
 .PHONY: install-dmg
 install-dmg: ## Install the freshly-built .dmg to /Applications, stripping Gatekeeper quarantine
 	@if [ ! -f "$(TAURI_DMG_PATH)" ]; then \

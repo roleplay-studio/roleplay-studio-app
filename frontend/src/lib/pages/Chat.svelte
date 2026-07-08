@@ -3,7 +3,7 @@
 
   import {
     api,
-    API_BASE,
+    apiBase,
     type Bot,
     type LLMDebugInfo,
     type LLMUsage,
@@ -525,8 +525,14 @@
     // Create a fresh AbortController so Stop can close the SSE stream
     // and so /abort can find the request to kill.
     streamAbort = new AbortController();
+    // Use the reactive `apiBase()` (reads localStorage.serverUrl on
+    // every call) rather than the module-captured `API_BASE` constant
+    // — `API_BASE` freezes the URL at module load, so a user who
+    // pointed the client at a remote server via localStorage still
+    // hits the original localhost endpoint after the change.
+    const messageUrl = `${apiBase()}/api/threads/${selectedThreadId}/messages`;
     try {
-      const resp = await fetch(`${API_BASE}/api/threads/${selectedThreadId}/messages`, {
+      const resp = await fetch(messageUrl, {
         body: JSON.stringify({
           bot_id: selectedBotId,
           file_ids: fileIds,
@@ -658,12 +664,22 @@
       console.error('Send failed:', e);
       streamError = true;
       if (typeof gotError === 'undefined' || !gotError) {
+        // Wrap fetch's opaque network error so the user sees which URL
+        // was hit. A bare "Error: TypeError: Failed to fetch" hides
+        // whether the client was pointed at the wrong host, the port
+        // is closed, or the server crashed mid-request.
+        const detail =
+          e instanceof TypeError && /fetch/i.test(e.message)
+            ? `Connection refused — backend not reachable at ${messageUrl}`
+            : e instanceof Error
+              ? e.message
+              : String(e);
         messages = [
           ...messages,
           {
             branch_group: null,
             branch_index: 0,
-            content: `⚠️ Error: ${e}`,
+            content: `⚠️ ${detail}`,
             created_at: null,
             id: null,
             is_active: true,

@@ -7,6 +7,7 @@ from app.application.services.chat import ChatService
 from app.application.services.knowledge import KnowledgeService
 from app.application.services.message_summarizer import MessageSummarizer
 from app.application.services.persona import PersonaService
+from app.application.services.settings import SettingsService
 from app.application.services.summary import SummaryService
 from app.application.services.thread import ThreadService
 from app.application.services.upload import UploadService
@@ -19,6 +20,7 @@ __all__ = [
     "KnowledgeService",
     "MessageSummarizer",
     "PersonaService",
+    "SettingsService",
     "SummaryService",
     "ThreadService",
     "UploadService",

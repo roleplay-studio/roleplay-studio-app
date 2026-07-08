@@ -219,6 +219,14 @@ class Settings(BaseSettings):
     # render correctly in either mode.
     log_level: str = "INFO"
     log_format: str = "pretty"
+    # Optional file sink for structured logs. When set, every event
+    # also lands in this file in the configured ``log_format`` (so
+    # ``log_format="json"`` + ``log_file=...`` is the recommended
+    # debug-bundle combo). Path is relative to ``ROLEPLAY_DATA_DIR``
+    # unless absolute. Rotated at 10 MB x 3 to keep disk usage
+    # bounded — a chat stream that crashes mid-run can otherwise
+    # produce megabytes per request.
+    log_file: str | None = None
 
     # Project version — default_factory reads it at construction
     # time so updating pyproject.toml is reflected without a re-install

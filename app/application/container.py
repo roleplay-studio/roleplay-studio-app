@@ -11,6 +11,7 @@ from app.application.services import (
     KnowledgeService,
     MessageSummarizer,
     PersonaService,
+    SettingsService,
     SummaryService,
     ThreadService,
     UploadService,
@@ -42,3 +43,9 @@ class ApplicationContainer:
     # Default is a NullMarkdownRepairer (no-op) so unit tests and
     # setups without the format-standart-rp library still work.
     markdown_repairer: MarkdownRepairer | None = None
+    # ``SettingsService`` owns the app-wide configurable lists
+    # (today: the bot category catalog). Required for the
+    # `/api/bots/categories` CRUD endpoints to work; defaults to
+    # ``None`` so existing tests that build the dataclass manually
+    # still pass without a settings service.
+    settings: SettingsService | None = None

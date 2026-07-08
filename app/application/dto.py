@@ -21,8 +21,13 @@ if typing.TYPE_CHECKING:
     from app.infrastructure.db.models import Bot
 
 # ── Predefined bot categories ───────────────────────────────────────
+# The runtime list now lives in the ``app_settings`` singleton table
+# (see ``app.application.services.settings``). The literal list below
+# is the **seed** for first-run installs and remains the user-editable
+# default until the user makes their first change. Keep the values
+# stable across releases — they're on-disk legacy data once seeded.
 
-BOT_CATEGORIES = [
+DEFAULT_BOT_CATEGORIES: list[str] = [
     "Anime",
     "Game",
     "Fantasy",
@@ -36,6 +41,12 @@ BOT_CATEGORIES = [
     "Custom",
 ]
 
+# Back-compat alias for any out-of-tree imports. Will be removed once
+# the next minor version ships. ``SettingsService`` no longer reads
+# this constant directly — it seeds the DB instead — so it lives
+# here only as documentation.
+BOT_CATEGORIES = DEFAULT_BOT_CATEGORIES
+
 # ── Bot API response (categories as list[str], not JSON string) ──────
 
 
@@ -44,6 +55,14 @@ class BotResponse(BaseModel):
 
     SQLModel Bot stores categories as a JSON string. This response model
     deserializes it to a proper list[str] for the frontend contract.
+
+    ``categories_invalid`` lists the entries in ``categories`` that
+    are no longer defined in the configured category list. The
+    frontend surfaces those as warning chips and offers a "remove"
+    shortcut, but the raw ``categories`` is left untouched so the
+    bot keeps its on-disk history intact until the user commits a
+    cleanup. Defaults to empty list — older callers that built
+    BotResponse by hand still get a valid payload.
     """
 
     id: int
@@ -54,6 +73,7 @@ class BotResponse(BaseModel):
     description: str = ""
     avatar_path: str | None = None
     categories: list[str] = Field(default_factory=list)
+    categories_invalid: list[str] = Field(default_factory=list)
     thread_count: int = 0
     bot_type: str = "rp"
     alternate_greetings: list[str] = Field(default_factory=list)
@@ -64,8 +84,18 @@ class BotResponse(BaseModel):
         cls,
         bot: Bot,
         thread_count: int = 0,
+        valid_categories: set[str] | None = None,
     ) -> BotResponse:
-        """Build an API response from a SQLModel Bot instance."""
+        """Build an API response from a SQLModel Bot instance.
+
+        ``valid_categories`` is the current user-defined category
+        list. When supplied, every entry in ``bot.categories`` is
+        cross-referenced and orphaned values land in
+        ``categories_invalid`` (raw ``categories`` is left
+        unchanged). When ``None`` (e.g. legacy test fixtures),
+        ``categories_invalid`` defaults to empty so the existing
+        contract is preserved.
+        """
         cats: list[str] = []
         if isinstance(bot.categories, str):
             try:
@@ -87,6 +117,10 @@ class BotResponse(BaseModel):
         elif isinstance(alt_raw, list):
             alt_greetings = alt_raw
 
+        invalid: list[str] = []
+        if valid_categories is not None and cats:
+            invalid = [c for c in cats if c not in valid_categories]
+
         return cls(
             id=bot.id,
             name=bot.name,
@@ -96,6 +130,7 @@ class BotResponse(BaseModel):
             description=bot.description or "",
             avatar_path=bot.avatar_path,
             categories=cats,
+            categories_invalid=invalid,
             thread_count=thread_count,
             bot_type=bot.bot_type or BotType.RP,
             alternate_greetings=alt_greetings,

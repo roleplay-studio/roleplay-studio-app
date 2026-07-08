@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from pathlib import Path
 from typing import Any
 
 import structlog
@@ -145,12 +146,58 @@ def configure_logging(settings: Any) -> None:
 
     # Replace (not append) the root logger's handlers so a
     # second call to configure_logging doesn't double the output.
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setFormatter(formatter)
     root = logging.getLogger()
     for existing in list(root.handlers):
         root.removeHandler(existing)
-    root.addHandler(handler)
+
+    # Stream handler — stderr by default so journalctl / docker logs
+    # pick it up without redirect magic. Tauri captures this from
+    # run_backend.py's child-process pipe.
+    stream_handler = logging.StreamHandler(sys.stderr)
+    stream_handler.setFormatter(formatter)
+    root.addHandler(stream_handler)
+
+    # Optional file sink. Useful for "send me the logs when this
+    # crashes" support flows: set ``LOG_FILE=backend.log`` in .env
+    # and the next backend restart writes every event to
+    # ``$ROLEPLAY_DATA_DIR/backend.log`` (rotated, see below).
+    log_file = getattr(settings, "log_file", None)
+    if log_file:
+        try:
+            from logging.handlers import RotatingFileHandler
+
+            # ``log_file`` may be relative to the data dir (so
+            # ``logs/backend.log`` works out of the box from
+            # Makefile-driven dev runs) or absolute. We resolve it
+            # against ``settings.data_dir`` (the canonical data-dir
+            # property that honours ``ROLEPLAY_DATA_DIR``) — NOT
+            # ``effective_db_path.parent``, which is the parent of
+            # the db file and may sit one level deeper when the db
+            # lives in a ``demo/`` subfolder (see ``db_path`` in
+            # ``.env.example``).
+            data_dir = settings.data_dir
+            log_path = (
+                Path(log_file).expanduser()
+                if Path(log_file).expanduser().is_absolute()
+                else Path(data_dir) / log_file
+            )
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            # 10 MB x 3 = 30 MB ceiling. A single chat stream can
+            # log hundreds of debug chunks; without rotation this
+            # would fill the user's disk on a misbehaving run.
+            file_handler = RotatingFileHandler(
+                log_path,
+                maxBytes=10 * 1024 * 1024,
+                backupCount=3,
+                encoding="utf-8",
+            )
+            file_handler.setFormatter(formatter)
+            root.addHandler(file_handler)
+        except Exception as exc:  # pragma: no cover — operator-facing
+            # Don't crash the backend on a bad log path; surface it
+            # on stderr so the operator sees it.
+            sys.stderr.write(f"[logging] failed to attach log_file={log_file!r}: {exc}\n")
+
     root.setLevel(level_value)
 
 
