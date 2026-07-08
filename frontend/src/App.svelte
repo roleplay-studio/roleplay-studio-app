@@ -5,7 +5,7 @@
   import { apiBase } from './lib/api';
   import BackendErrorScreen from './lib/BackendErrorScreen.svelte';
   import GlobalDropZone from './lib/GlobalDropZone.svelte';
-  import { currentLang } from './lib/i18n';
+  import { currentLang, t } from './lib/i18n';
   import BotCreatePage from './lib/pages/BotCreatePage.svelte';
   import BotEditPage from './lib/pages/BotEditPage.svelte';
   import BotPreviewPage from './lib/pages/BotPreviewPage.svelte';
@@ -17,6 +17,7 @@
   import SettingsPage from './lib/pages/SettingsPage.svelte';
   import SetupWizard from './lib/pages/SetupWizard.svelte';
   import Sidebar from './lib/Sidebar.svelte';
+  import SplashScreen from './lib/SplashScreen.svelte';
   import { isMobile, sidebarOpen } from './lib/stores/sidebar';
   import { applyThemePreference, initTheme } from './lib/theme';
   import UIPreview from './lib/ui/_catalog/UIPreview.svelte';
@@ -31,6 +32,12 @@
   >(null);
   let retrying = $state(false);
   let unsubSidebar: (() => void) | undefined;
+  let abortController: AbortController | undefined;
+  // Reactive language for the splash screen. Subscribed to currentLang
+  // so localized strings update if the user switches language before
+  // the backend finishes starting.
+  let splashLang = $state('en');
+  let unsubLang: (() => void) | undefined;
 
   function parseHash() {
     const hash = window.location.hash.slice(1) || '/';
@@ -115,6 +122,11 @@
     // Persist sidebar state on changes
     unsubSidebar = setupSidebarPersistence();
 
+    // React to language changes — the splash strings need to follow
+    // the user's choice, not stay frozen in whatever locale was
+    // active when onMount ran.
+    unsubLang = currentLang.subscribe((v) => (splashLang = v));
+
     // Initialize theme from localStorage (instant)
     const localPref = initTheme();
 
@@ -137,35 +149,90 @@
   });
 
   /**
-   * Hit /api/health and translate the result into one of three states:
-   *   - backendError = {kind: 'unreachable'} — network error, server is down
-   *   - backendError = {kind: 'degraded', status, detail} — 503 from health
-   *   - backendError = undefined, needsSetup = true | false — normal path
+   * Poll /api/health until the backend reports 200, then check
+   * whether first-run setup is needed. While the backend is starting
+   * up (listening on the port but the FastAPI lifespan not yet
+   * finished) /api/health returns 503 — that's normal during startup,
+   * so we keep polling with exponential backoff instead of showing
+   * the error screen.
+   *
+   * Outcomes:
+   *   - backendError = undefined, needsSetup = true | false  → ready
+   *   - backendError = { kind: 'degraded', status, detail }   → HTTP error
+   *   - backendError = { kind: 'unreachable' }                → max attempts
+   *
+   * `AbortController` lets `onDestroy` cancel an in-flight retry so
+   * hot-reload doesn't leave a zombie timer behind. `AbortSignal.
+   * timeout` is a safety net against a hung TCP keepalive.
    */
   async function checkBackend() {
+    backendError = null;
+    needsSetup = null;
     retrying = true;
-    try {
-      const res = await fetch(`${apiBase()}/api/health`, {
-        cache: 'no-store',
-        headers: { Accept: 'application/json' },
-      });
-      if (res.status === 200) {
-        backendError = undefined;
-        // Backend is healthy — now check whether first-run setup is needed.
-        try {
-          const statusRes = await fetch(`${apiBase()}/api/setup/status`);
-          const data = await statusRes.json();
-          needsSetup = !!data.needs_setup;
-        } catch {
-          // Health says ok but setup status is broken — fall back to wizard
-          // so the user at least sees a working UI.
-          needsSetup = true;
+
+    const controller = new AbortController();
+    abortController = controller;
+    let delay = 1000;
+    const maxAttempts = 30;
+
+    const sleep = (ms: number) =>
+      new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+    // Combine our own controller signal with a 3s safety timeout.
+    // ``AbortSignal.any`` was added in Safari 17.4 (macOS 14.4) and
+    // the bundle's ``minimumSystemVersion`` is 14.0, so the runtime
+    // WebView on older systems throws TypeError instead of returning
+    // a usable signal — feature-detect and fall back to our
+    // controller-only path. The 3s ceiling is still enforced via a
+    // setTimeout below; it just races with the network call instead
+    // of being passed through fetch.
+    const supportsAny = typeof AbortSignal.any === 'function';
+    const makeSignal = (): AbortSignal => {
+      if (supportsAny) return AbortSignal.any([controller.signal, AbortSignal.timeout(3000)]);
+      const timed = new AbortController();
+      const t = setTimeout(() => timed.abort(), 3000);
+      // If our outer controller aborts, cancel the timeout so it
+      // doesn't leak.
+      controller.signal.addEventListener('abort', () => {
+        clearTimeout(t);
+        timed.abort();
+      }, { once: true });
+      return timed.signal;
+    };
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const res = await fetch(`${apiBase()}/api/health`, {
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+          signal: makeSignal(),
+        });
+
+        if (res.ok) {
+          backendError = undefined;
+          // Backend is healthy — now check whether first-run setup is needed.
+          try {
+            const statusRes = await fetch(`${apiBase()}/api/setup/status`);
+            const data = await statusRes.json();
+            needsSetup = !!data.needs_setup;
+          } catch {
+            // Health says ok but setup status is broken — fall back to wizard
+            // so the user at least sees a working UI.
+            needsSetup = true;
+          }
+          retrying = false;
+          return;
         }
-        return;
-      }
-      if (res.status === 503) {
-        // Backend reachable but degraded. Try to extract the db_error
-        // so the user sees something actionable.
+
+        if (res.status === 503) {
+          // Backend reachable but lifespan (DB / LLM init) not done yet —
+          // keep showing the splash and retry after the current backoff.
+          await sleep(delay);
+          delay = Math.min(delay * 2, 8000);
+          continue;
+        }
+
+        // Any other HTTP error → surface to the user.
         let detail: string | undefined;
         try {
           const body = await res.json();
@@ -173,33 +240,48 @@
         } catch {
           /* response body wasn't JSON */
         }
-        backendError = { detail, kind: 'degraded', status: 503 };
+        backendError = { detail, kind: 'degraded', status: res.status };
+        retrying = false;
         return;
+      } catch (e) {
+        // AbortError = component destroyed or request timed out.
+        // Either way we stop the polling loop quietly.
+        if (e instanceof Error && e.name === 'AbortError') {
+          retrying = false;
+          return;
+        }
+        // Network failure (DNS, ECONNREFUSED, offline, …) — keep trying.
+        await sleep(delay);
+        delay = Math.min(delay * 2, 8000);
       }
-      // Some other HTTP error — treat as unreachable from the user's POV.
-      backendError = { kind: 'unreachable', status: res.status };
-    } catch (e) {
-      // Network failure (DNS, ECONNREFUSED, offline, …).
-      const msg = e instanceof Error ? e.message : String(e);
-      backendError = { detail: msg, kind: 'unreachable' };
-    } finally {
-      retrying = false;
     }
+
+    // Exhausted retries — give up and surface the error screen.
+    retrying = false;
+    backendError = { kind: 'unreachable' };
   }
 
   onDestroy(() => {
     unsubSidebar?.();
     window.removeEventListener('resize', handleResize);
+    // Cancel any in-flight health probe + scheduled retry so a hot
+    // reload or route away doesn't leave a dangling setTimeout.
+    abortController?.abort();
+    unsubLang?.();
   });
 </script>
 
 {#if backendError !== undefined}
   {#if backendError === null}
-    <!-- Initial health check in flight — keep the page neutral so we
-         don't flash the main app before we know if the backend is up. -->
-    <div class="boot-loading">
-      <div class="boot-spinner"></div>
-    </div>
+    <!-- Backend startup in progress — keep the splash visible until
+         /api/health returns 200 (or we exhaust retries). The detail
+         line is shown only while we're actively retrying so a stuck
+         backend is easy to debug from the screenshot. -->
+    <SplashScreen
+      title={t('splash.app_name', splashLang)}
+      message={t('splash.checking_backend', splashLang)}
+      detail={retrying ? `${apiBase()}/api/health` : undefined}
+    />
   {:else}
     <BackendErrorScreen
       kind={backendError.kind}
@@ -275,26 +357,7 @@
 {/if}
 
 <style>
-  .boot-loading {
-    position: fixed;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--ray-bg);
-    z-index: 9999;
-  }
-  .boot-spinner {
-    width: 32px;
-    height: 32px;
-    border: 3px solid var(--ray-border-strong);
-    border-top-color: var(--ray-accent);
-    border-radius: 50%;
-    animation: boot-spin 0.7s linear infinite;
-  }
-  @keyframes boot-spin {
-    to {
-      transform: rotate(360deg);
-    }
-  }
+  /* Splash-specific styles live in SplashScreen.svelte. App.svelte
+     used to draw its own inline spinner here; now that the splash
+     is a real component it owns the animation and a11y attributes. */
 </style>

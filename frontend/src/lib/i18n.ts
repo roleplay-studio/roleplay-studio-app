@@ -467,6 +467,8 @@ const dict: LangDict = Object.freeze({
     'setup.backend_unavailable_hint':
       'Der API-Server antwortet nicht. Bitte starte das Backend neu und versuche es erneut.',
     'setup.base_url': 'Basis-URL',
+    'splash.app_name': 'Roleplay Studio',
+    'splash.checking_backend': 'Warte auf Backend…',
     'setup.chat_model': 'Chat-Modell',
     'setup.connect': 'Verbindung',
     'setup.connect_hint': 'Konfiguriere, wie dein Anbieter erreicht wird',
@@ -1012,6 +1014,8 @@ const dict: LangDict = Object.freeze({
     'setup.backend_unavailable_hint':
       'The API server is not responding. Please restart the backend and try again.',
     'setup.base_url': 'Base URL',
+    'splash.app_name': 'Roleplay Studio',
+    'splash.checking_backend': 'Waiting for backend…',
     'setup.chat_model': 'Chat Model',
     'setup.connect': 'Connection',
     'setup.connect_hint': 'Configure how to reach your provider',
@@ -1542,6 +1546,8 @@ const dict: LangDict = Object.freeze({
     'setup.backend_unavailable_hint':
       'Le serveur API ne répond pas. Veuillez redémarrer le backend et réessayer.',
     'setup.base_url': 'URL de base',
+    'splash.app_name': 'Roleplay Studio',
+    'splash.checking_backend': 'Connexion au backend…',
     'setup.chat_model': 'Modèle de chat',
     'setup.connect': 'Connexion',
     'setup.connect_hint': 'Configurer la façon de joindre votre fournisseur',
@@ -2071,6 +2077,8 @@ const dict: LangDict = Object.freeze({
     'setup.backend_unavailable_hint':
       'APIサーバーが応答しません。バックエンドを再起動してから、もう一度お試しください。',
     'setup.base_url': 'ベースURL',
+    'splash.app_name': 'Roleplay Studio',
+    'splash.checking_backend': 'バックエンドを待機中…',
     'setup.chat_model': 'チャットモデル',
     'setup.connect': '接続',
     'setup.connect_hint': 'プロバイダーへの接続方法を設定',
@@ -2595,6 +2603,8 @@ const dict: LangDict = Object.freeze({
     'setup.backend_unavailable_hint':
       'API 서버가 응답하지 않습니다. 백엔드를 다시 시작한 후 다시 시도하세요.',
     'setup.base_url': '기본 URL',
+    'splash.app_name': 'Roleplay Studio',
+    'splash.checking_backend': '백엔드 대기 중…',
     'setup.chat_model': '채팅 모델',
     'setup.connect': '연결',
     'setup.connect_hint': '제공업체 연결 방법을 설정하세요',
@@ -3143,6 +3153,8 @@ const dict: LangDict = Object.freeze({
     'setup.backend_unavailable_hint':
       'API-сервер не отвечает. Перезапустите бэкенд и попробуйте снова.',
     'setup.base_url': 'Base URL',
+    'splash.app_name': 'Roleplay Studio',
+    'splash.checking_backend': 'Ожидание бэкенда…',
     'setup.chat_model': 'Модель для чата',
     'setup.connect': 'Подключение',
     'setup.connect_hint': 'Настройте доступ к провайдеру',
@@ -3641,6 +3653,8 @@ const dict: LangDict = Object.freeze({
     'setup.backend_unavailable': '后端不可用',
     'setup.backend_unavailable_hint': 'API 服务器没有响应。请重新启动后端后再试。',
     'setup.base_url': '基础 URL',
+    'splash.app_name': 'Roleplay Studio',
+    'splash.checking_backend': '正在连接后端…',
     'setup.chat_model': '对话模型',
     'setup.connect': '连接',
     'setup.connect_hint': '配置如何访问你的提供商',

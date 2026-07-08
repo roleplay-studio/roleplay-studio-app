@@ -127,3 +127,51 @@ def test_existing_stdlib_logger_still_emits_through_structlog(capfd):
     assert non_empty, f"stdlib log line did not reach the handler: {captured.err!r}"
     last = json.loads(non_empty[-1])
     assert last["event"] == "stdlib.event"
+
+
+def test_log_file_creates_rotating_handler(tmp_path):
+    """``Settings.log_file`` must add a ``RotatingFileHandler`` so
+    operators can point at a file when reproducing a bug. The handler
+    must use the same ``ProcessorFormatter`` as the stderr stream
+    handler so JSON in == JSON out (mixed formats would make log
+    search impossible)."""
+    log_path = tmp_path / "backend.log"
+    settings = Settings(
+        _env_file=None, log_format="json", log_level="DEBUG", log_file=str(log_path)
+    )
+    configure_logging(settings)
+    log = get_logger("m20.test.file")
+    log.info("event.to.file", x=1)
+    # Force handlers to flush before we read the file.
+    for h in logging.getLogger().handlers:
+        h.flush()
+    assert log_path.exists(), "log_file was not created"
+    text = log_path.read_text(encoding="utf-8")
+    assert "event.to.file" in text
+    # File must be parseable JSON when log_format=json — that's the
+    # whole point of the file sink (machine-parseable for ELK).
+    line = next(line for line in text.splitlines() if line.strip().startswith("{"))
+    parsed = json.loads(line)
+    assert parsed["event"] == "event.to.file"
+    assert parsed["x"] == 1
+
+
+def test_log_file_relative_path_resolves_against_data_dir(tmp_path, monkeypatch):
+    """A relative ``log_file`` value must be resolved against
+    ``$ROLEPLAY_DATA_DIR`` so an operator can write ``LOG_FILE=logs/backend.log``
+    in ``.env`` without thinking about cwd. We point ROLEPLAY_DATA_DIR
+    at a tmp dir and assert the file lands inside it."""
+    log_file_rel = "logs/backend.log"
+    # ROLEPLAY_DATA_DIR is read by Settings.from_env() at access
+    # time, so monkeypatching the env before configure_logging is
+    # enough — no need to mock Settings itself.
+    monkeypatch.setenv("ROLEPLAY_DATA_DIR", str(tmp_path))
+    settings = Settings(_env_file=None, log_file=log_file_rel)
+    configure_logging(settings)
+    log = get_logger("m20.test.relpath")
+    log.info("event.relpath")
+    for h in logging.getLogger().handlers:
+        h.flush()
+    expected = tmp_path / "logs" / "backend.log"
+    assert expected.exists(), f"relative log_file did not land in data dir; expected {expected}"
+    assert "event.relpath" in expected.read_text(encoding="utf-8")
