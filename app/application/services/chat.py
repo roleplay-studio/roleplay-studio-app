@@ -381,13 +381,30 @@ class ChatService:
             # actual assistant message id (rare edge case: empty
             # content stream) and an LLM client.
             #
+            # **RP-only gate.** State-tracking is a roleplay
+            # feature — assistant/agent bots are productivity
+            # tools that don't have a world to track. Running the
+            # state LLM call for them is pure waste and leaks the
+            # bot's prompts/world-state into a context that
+            # doesn't need it. ``bot_type`` defaults to ``RP`` for
+            # legacy reasons (pre-migration bots had no field),
+            # which keeps old config working but is no excuse to
+            # let a real assistant bot trigger this path.
+            #
             # ``getattr(..., "")`` keeps backwards compat with tests
             # that build minimal ``SimpleNamespace`` bots without the
             # new fields. Production always has them (SQLModel default
-            # is ``""``).
+            # is "").
+            bot_type = bot.bot_type if bot is not None else BotType.RP
+            if isinstance(bot_type, str):
+                # Tolerate string values coming through the API
+                # before ``BotType`` is applied. Mirror the same
+                # pattern used in ``_repair_for_rp``.
+                bot_type = BotType(bot_type) if bot_type else BotType.RP
             if (
                 assistant_msg_id is not None
                 and bot is not None
+                and bot_type == BotType.RP
                 and getattr(bot, "world_state_prompt", "").strip()
                 and self._llm is not None
             ):
@@ -718,6 +735,25 @@ class ChatService:
             )
             return
 
+        # **RP-only gate (defence in depth).** The auto-spawn
+        # caller in ``stream_message`` already gates on
+        # ``bot_type == RP``, but ``regenerate_state`` is also
+        # reachable from the public ``POST /state/regenerate``
+        # endpoint. A misconfigured call against an
+        # assistant/agent bot must not silently burn tokens or
+        # overwrite ``Conversation.state`` with a junk world
+        # snapshot — just log and bail.
+        bot_type = getattr(bot, "bot_type", BotType.RP)
+        if isinstance(bot_type, str):
+            bot_type = BotType(bot_type) if bot_type else BotType.RP
+        if bot_type != BotType.RP:
+            logger.info(
+                "regenerate_state skipped for message %d: bot_type=%s is not RP",
+                assistant_message_id,
+                bot_type,
+            )
+            return
+
         try:
             # Step 1: pull the assistant's persisted content. If the
             # message was deleted between save and regenerate (race),
@@ -754,15 +790,17 @@ class ChatService:
             # something a real LLM provider will actually accept —
             # 4 MiB (the previous value) is rejected by OpenAI,
             # OpenRouter, Anthropic, and most open-source providers.
-            # 4 KiB is generous for any YAML/JSON/prose snapshot
+            # 8 KiB is generous for any YAML/JSON/prose snapshot
             # of a chat turn; anything bigger is a runaway that
-            # should be clipped, not honoured. We use 4096 (4 KiB
-            # in tokens) because the YAML snapshot of even a single
-            # RP turn with two NPCs and a list of secrets can run
-            # past 2 KiB (the 0.0.4 default) — bumping up keeps
-            # large bots from getting their state silently chopped
-            # mid-section. The post-call check below detects
-            # ``finish_reason=length`` and flags the truncation
+            # should be clipped, not honoured. We use 8192 (8 KiB
+            # in tokens) because long-running roleplay sessions
+            # accumulate a large world state (NPCs with
+            # secrets_known lists, multi-section world state,
+            # session memory) — the 0.0.4 default of 2048 chopped
+            # it mid-section and even the 4096 bump from .0.0.5 is
+            # too tight for a session that has been going for a
+            # while. The post-call check below detects the missing
+            # closing triple-backtick fence and flags the truncation
             # with a trailing marker so the UI knows.
             response = await state_llm.generate_response(
                 messages=[
@@ -776,7 +814,7 @@ class ChatService:
                         ),
                     },
                 ],
-                max_tokens=4096,
+                max_tokens=8192,
             )
 
             # 4 MiB upper bound on persisted state. The state string
@@ -1317,7 +1355,20 @@ class ChatService:
         if not history and bot.first_message:
             history = [MessageDTO(role="assistant", content=bot.first_message, created_at=None)]
 
-        context = await self._knowledge.search(command.bot_id, command.user_input, top_k=15)
+        # RAG context. Skip the embedding model call entirely when
+        # the bot has no knowledge base entries — the similarity
+        # search would land on zero documents and return ``[]``
+        # anyway, but the per-query vector cost is real. The
+        # underlying ``_knowledge.search`` also short-circuits
+        # internally, but checking here saves the async hop and
+        # the lock acquisition on the chat hot path.
+        context: list[str] = []
+        if self._knowledge is not None and await self._knowledge.has_documents(
+            command.bot_id
+        ):
+            context = await self._knowledge.search(
+                command.bot_id, command.user_input, top_k=15
+            )
 
         user_persona = None
         if command.persona_id is not None and self._personas is not None:
@@ -1397,9 +1448,28 @@ class ChatService:
             temperature=settings.default_temperature,
             uploaded_files=uploaded_files,
             mes_example=getattr(bot, "mes_example", "") or "",
-            dynamic_system_prompt=getattr(bot, "dynamic_system_prompt", "") or "",
-            world_state_prompt=getattr(bot, "world_state_prompt", "") or "",
-            prev_world_state=prev_world_state,
+            # **RP-only fields.** ``dynamic_system_prompt`` and
+            # ``world_state_prompt`` are roleplay-only features
+            # (floating reminder + world-state tracking). We zero
+            # them out for assistant/agent bots so the orchestrator
+            # never injects a ``[Reminder]`` / ``[World state]``
+            # block into a productivity context where it doesn't
+            # belong. The schema still carries the values (the
+            # fields exist on the model) — we just don't push them
+            # into the request.
+            dynamic_system_prompt=(
+                getattr(bot, "dynamic_system_prompt", "") or ""
+                if bot_type == BotType.RP
+                else ""
+            ),
+            world_state_prompt=(
+                getattr(bot, "world_state_prompt", "") or ""
+                if bot_type == BotType.RP
+                else ""
+            ),
+            prev_world_state=(
+                prev_world_state if bot_type == BotType.RP else ""
+            ),
         )
 
     # ── Section 8: Branch-aware deletion helpers ─────────────────────

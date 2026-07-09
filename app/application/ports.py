@@ -290,6 +290,18 @@ class KnowledgeBaseRepository(Protocol):
 
     async def list_entries(self, bot_id: int) -> list[KnowledgeEntryDTO]: ...
 
+    async def has_documents(self, bot_id: int) -> bool:
+        """Cheap "is the KB non-empty for this bot?" probe.
+
+        Lets the chat hot path skip the per-turn embedding model
+        call when the bot has no knowledge base entries — the
+        similarity search would return ``[]`` anyway, so paying
+        the vector cost is pure waste. Implementations must use
+        metadata-only reads (``vectorstore.get(include=[])``) and
+        must NOT call the embedding function.
+        """
+        ...
+
     async def delete(self, bot_id: int, entry_id: str) -> None: ...
 
     async def update(self, bot_id: int, entry_id: str, content: str) -> None: ...

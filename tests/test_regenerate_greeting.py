@@ -58,6 +58,9 @@ class _FakeBots:
 class _FakeKnowledge:
     async def search(self, bot_id, query, top_k):
         return []
+    async def has_documents(self, bot_id):
+        return False
+
 
 
 class _FakeOrchestrator:
