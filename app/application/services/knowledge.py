@@ -79,6 +79,18 @@ class KnowledgeService:
     async def search(self, bot_id: int, query: str, top_k: int = 15) -> list[str]:
         return await self._knowledge.search(bot_id, query, top_k)
 
+    async def has_documents(self, bot_id: int) -> bool:
+        """Cheap probe: does this bot have any KB entries?
+
+        The chat hot path uses this to skip the per-turn embedding
+        model call when the bot's knowledge base is empty — the
+        similarity search would return ``[]`` anyway, so the
+        vector call is pure waste. See the comment in
+        ``KnowledgeBaseRepository.has_documents`` for the
+        no-embedding-call contract.
+        """
+        return await self._knowledge.has_documents(bot_id)
+
     async def test_search(
         self, bot_id: int, query: str, top_k: int = 15
     ) -> list[tuple[str, float]]:

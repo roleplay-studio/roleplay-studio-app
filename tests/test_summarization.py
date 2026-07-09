@@ -213,6 +213,9 @@ class FakeKnowledgeRepo:
     async def search(self, bot_id, query, top_k=3):
         return []
 
+    async def has_documents(self, bot_id):
+        return False
+
     async def add(self, command):
         pass
 

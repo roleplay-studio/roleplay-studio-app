@@ -259,6 +259,9 @@ class _FakeKnowledge:
     async def search(self, *args, **kwargs):
         return []
 
+    async def has_documents(self, *args, **kwargs):
+        return False
+
 
 class _FakeOrchestrator:
     """Yields the chunks passed at construction time."""

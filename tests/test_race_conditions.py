@@ -155,6 +155,9 @@ class _StubKnowledge:
     async def search(self, *args, **kwargs):
         return []
 
+    async def has_documents(self, *args, **kwargs):
+        return False
+
 
 def _make_service(messages: _StubMessages, orch: _StubOrchestrator, settings=None) -> ChatService:
     return ChatService(

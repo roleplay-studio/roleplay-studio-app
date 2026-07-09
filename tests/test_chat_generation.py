@@ -145,6 +145,14 @@ class FakeKnowledgeRepo:
     async def list_entries(self, bot_id):
         return []
 
+    async def has_documents(self, bot_id):
+        # Default to True so the chat hot path calls ``search`` —
+        # this is the original behaviour every test in
+        # ``test_chat_generation.py`` was written against. Specific
+        # tests that want to exercise the no-embedding-call
+        # short-circuit can override this to return ``False``.
+        return True
+
     async def delete(self, bot_id, entry_id):
         pass
 

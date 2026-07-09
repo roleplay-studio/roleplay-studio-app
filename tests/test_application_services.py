@@ -178,6 +178,9 @@ class FakeKnowledgeRepository:
     async def list_entries(self, bot_id):
         return [KnowledgeEntryDTO(id="1", content="doc")]
 
+    async def has_documents(self, bot_id):
+        return True
+
     async def delete(self, bot_id, entry_id):
         pass
 
