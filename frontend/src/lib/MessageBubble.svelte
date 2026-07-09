@@ -75,6 +75,12 @@
     return raw !== 'false';
   }
   let reasoningOpen = $state(readReasoningOpen());
+  // Floating system-prompt panel starts collapsed; world-state opens
+  // by default since state is the most useful debug signal. Both stay
+  // per-message (no shared localStorage key) — the reasoning pattern
+  // uses one global because it's usually small; prompt and state can
+  // be longer and vary turn-to-turn, so per-bubble state is simpler.
+  let stateOpen = $state(true);
   function onReasoningToggle(e: Event) {
     const el = e.currentTarget as HTMLDetailsElement;
     reasoningOpen = el.open;
@@ -200,6 +206,26 @@
               {t('chat.reasoning_label', lang)}
             </summary>
             <div class="mb-reasoning-body">{msg.reasoning}</div>
+          </details>
+        {/if}
+
+        {#if msg.dynamic_system_prompt}
+          <details class="mb-reasoning mb-prompt" open={false}>
+            <summary>
+              <span class="mb-reasoning-dot"></span>
+              {t('chat.dynamic_system_prompt_label', lang)}
+            </summary>
+            <pre class="mb-reasoning-body">{msg.dynamic_system_prompt}</pre>
+          </details>
+        {/if}
+
+        {#if msg.state}
+          <details class="mb-reasoning mb-state" open={stateOpen}>
+            <summary>
+              <span class="mb-reasoning-dot"></span>
+              {t('chat.world_state_label', lang)}
+            </summary>
+            <pre class="mb-reasoning-body">{msg.state}</pre>
           </details>
         {/if}
 
@@ -713,5 +739,27 @@
     word-break: break-word;
     max-height: 320px;
     overflow-y: auto;
+  }
+
+  /* Floating system-prompt panel: tinted summary + dot so the
+     operator can tell it apart from reasoning/world-state at a
+     glance. Uses the mb-accent token so it reads as "instruction
+     sent to the model". */
+  .mb-prompt > summary {
+    color: var(--mb-accent, #8b5cf6);
+  }
+  .mb-prompt > summary > .mb-reasoning-dot {
+    background: var(--mb-accent, #8b5cf6);
+  }
+
+  /* World-state panel: a second accent color, distinct from prompt
+     and reasoning, so three panels on one bubble stay readable. The
+     fallback value matches Raycast's ``--ray-info`` if the app
+     doesn't override it. */
+  .mb-state > summary {
+    color: var(--mb-info, #3b82f6);
+  }
+  .mb-state > summary > .mb-reasoning-dot {
+    background: var(--mb-info, #3b82f6);
   }
 </style>

@@ -96,6 +96,7 @@ class ChatService:
         personas: PersonaRepository | None = None,
         threads: ThreadRepository | None = None,
         llm: LLMPort | None = None,
+        fast_llm: LLMPort | None = None,
         files: ThreadFileRepository | None = None,
         summarizer: MessageSummarizer | None = None,
         markdown_repairer: MarkdownRepairer | None = None,
@@ -114,7 +115,17 @@ class ChatService:
         self._settings: Settings = settings or Settings.from_env()
         self._personas = personas
         self._threads = threads
+        # ``self._llm`` is the chat-quality model — used for the
+        # primary chat stream. ``self._fast_llm`` is the cheap model
+        # used for background tasks (state regeneration, thread
+        # auto-naming). They share the same ``LLMPort`` contract but
+        # are wired to different providers in production: chat uses
+        # ``chat_model``, background uses ``fast_model``. When only
+        # ``llm`` is supplied, state-regen falls back to it (matches
+        # the pre-fix behaviour for tests that don't bother wiring
+        # two providers).
         self._llm = llm
+        self._fast_llm: LLMPort | None = fast_llm
         self._files = files
         self._summarizer = summarizer
         # Default to a no-op repairer so unit tests that construct
@@ -346,13 +357,43 @@ class ChatService:
         full_reasoning = "".join(reasoning_chunks)
         if response:
             response = _repair_for_rp(self._markdown_repairer, bot_type, response)
-            _assistant_msg_id = await self._messages.save(
+            assistant_msg_id = await self._messages.save(
                 command.thread_id,
                 "assistant",
                 response,
                 generation_status="complete",
                 reasoning=full_reasoning or None,
+                # Stamp the floating prompt we actually sent so the chat
+                # UI can render the "what was injected" panel. Mirrors
+                # how ``reasoning`` is captured — same field pattern, same
+                # lifecycle. Empty string = no floating prompt sent (no-op
+                # for the bot author; the panel simply doesn't render).
+                dynamic_system_prompt=request.dynamic_system_prompt or None,
             )
+
+            # Background state-update task. Mirrors the
+            # ``run_summarization`` pattern in the route handler (see
+            # api/routes/chat.py:96-127): fire-and-forget with a strong
+            # reference on the container so the task isn't dropped by
+            # the GC mid-flight. Only kicked off when the bot has a
+            # non-empty ``world_state_prompt`` — empty = no schema =
+            # no point burning LLM tokens. Also gated on having an
+            # actual assistant message id (rare edge case: empty
+            # content stream) and an LLM client.
+            #
+            # ``getattr(..., "")`` keeps backwards compat with tests
+            # that build minimal ``SimpleNamespace`` bots without the
+            # new fields. Production always has them (SQLModel default
+            # is ``""``).
+            if (
+                assistant_msg_id is not None
+                and bot is not None
+                and getattr(bot, "world_state_prompt", "").strip()
+                and self._llm is not None
+            ):
+                await self._maybe_run_state_update(
+                    command.thread_id, assistant_msg_id, bot, request
+                )
 
             # Check if this is the first real exchange — no user messages yet (excluding the one we just saved)
             history_after = await self._load_full_history(command.thread_id)
@@ -598,6 +639,238 @@ class ChatService:
             # m5: thread summary is fire-and-forget UX; the next
             # run will retry. Don't fail the user message.
             logger.exception("Failed to update thread summary for %d", thread_id)
+
+    async def _maybe_run_state_update(
+        self,
+        thread_id: int,
+        assistant_message_id: int,
+        bot,
+        request: ConversationRequest,
+    ) -> None:
+        """Spawn a background task that updates Conversation.state.
+
+        Called inline from ``stream_message`` after the assistant
+        message is persisted. The actual LLM call happens in
+        ``regenerate_state``; this wrapper is the *scheduling* point
+        — see ``api/routes/chat.py:96-127`` for the GC-safety pattern
+        this mirrors.
+
+        We don't await the state generation here — the SSE response
+        is already done and the user is reading. State is a debug/UX
+        signal, not on the critical path.
+        """
+        import asyncio
+
+        # Fire-and-forget. ``asyncio.create_task`` keeps the task
+        # alive until completion provided something holds a strong
+        # reference; we attach to the container's private dict so a
+        # worker process restart doesn't drop the task mid-flight.
+        # The container is a frozen dataclass — fall back to a
+        # local reference if monkey-patching the dict isn't allowed.
+        task = asyncio.create_task(
+            self.regenerate_state(thread_id, assistant_message_id, bot, request),
+            name=f"state-{thread_id}-{assistant_message_id}",
+        )
+
+        def _log_failure(t: asyncio.Task) -> None:
+            if t.cancelled():
+                return
+            exc = t.exception()
+            if exc is not None:
+                # Regenerate_state already logs internally; this is a
+                # belt-and-braces catch-all so a stray exception never
+                # bubbles into the asyncio runtime.
+                logger.exception(
+                    "Background state update failed for message %d",
+                    assistant_message_id,
+                )
+
+        task.add_done_callback(_log_failure)
+
+    async def regenerate_state(
+        self,
+        thread_id: int,
+        assistant_message_id: int,
+        bot,
+        request: ConversationRequest,
+    ) -> None:
+        """Re-derive Conversation.state from the latest exchange.
+
+        Fire-and-forget. Errors are logged but never raised — state
+        is a UX/debug signal, not a correctness invariant.
+
+        The full LLM response is persisted verbatim into
+        ``Conversation.state``. No YAML parsing, no fence stripping,
+        no schema validation: the bot developer owns the format via
+        ``world_state_prompt``. Whatever comes back is what gets
+        stored. We do add a 4 MiB upper bound so a runaway prompt
+        can't bloat the DB.
+        """
+        # The cheap fast-model handles state gen — structured output,
+        # not chat quality. Falls back to the chat model when the
+        # caller didn't wire a separate fast provider (test fixtures,
+        # bootstrap configs that haven't been upgraded yet).
+        state_llm = self._fast_llm or self._llm
+        if state_llm is None:
+            logger.warning(
+                "regenerate_state skipped for message %d: no LLM available",
+                assistant_message_id,
+            )
+            return
+
+        try:
+            # Step 1: pull the assistant's persisted content. If the
+            # message was deleted between save and regenerate (race),
+            # we silently bail — there's no assistant content to seed
+            # the state-prompt with, and we never want to fabricate
+            # one.
+            assistant_msg_text = await self._load_assistant_content(
+                thread_id, assistant_message_id
+            )
+            if not assistant_msg_text:
+                logger.info(
+                    "regenerate_state skipped for message %d: "
+                    "assistant content missing (likely deleted)",
+                    assistant_message_id,
+                )
+                return
+
+            # Step 2: pull the previous assistant's state via a
+            # dedicated lookup. The old approach used
+            # ``list_for_thread(limit=2, before_id=N)`` and took
+            # ``history[-1].state`` — that pattern silently returns
+            # ``""`` whenever the DESC window doesn't happen to
+            # include the previous assistant (e.g. two consecutive
+            # user turns, an edit that landed as a fresh insert with a
+            # higher id, etc.). The dedicated query is both correct
+            # AND cheaper.
+            previous_state = (
+                await self._messages.get_previous_assistant_state(
+                    thread_id, before_message_id=assistant_message_id
+                )
+            )
+
+            # Step 3: the LLM call. ``max_tokens`` is bounded to
+            # something a real LLM provider will actually accept —
+            # 4 MiB (the previous value) is rejected by OpenAI,
+            # OpenRouter, Anthropic, and most open-source providers.
+            # 4 KiB is generous for any YAML/JSON/prose snapshot
+            # of a chat turn; anything bigger is a runaway that
+            # should be clipped, not honoured. We use 4096 (4 KiB
+            # in tokens) because the YAML snapshot of even a single
+            # RP turn with two NPCs and a list of secrets can run
+            # past 2 KiB (the 0.0.4 default) — bumping up keeps
+            # large bots from getting their state silently chopped
+            # mid-section. The post-call check below detects
+            # ``finish_reason=length`` and flags the truncation
+            # with a trailing marker so the UI knows.
+            response = await state_llm.generate_response(
+                messages=[
+                    {"role": "system", "content": bot.world_state_prompt},
+                    {
+                        "role": "user",
+                        "content": (
+                            f"Previous state:\n{previous_state or '(none)'}\n\n"
+                            f"User message:\n{request.user_input}\n\n"
+                            f"Assistant response:\n{assistant_msg_text}"
+                        ),
+                    },
+                ],
+                max_tokens=4096,
+            )
+
+            # 4 MiB upper bound on persisted state. The state string
+            # is whatever the LLM returned in
+            # ``max_tokens=4096`` above — for a YAML/JSON/prose
+            # snapshot of a chat turn that's well under a megabyte.
+            # The 4 MiB cap is the absolute ceiling that keeps a
+            # runaway prompt from bloating every message row and the
+            # JSON we send on every listMessages refresh.
+            #
+            # 4 * 1024 * 1024 = 4 MiB. (Not 4 KB — an older comment
+            # miscounted; see the m-state-bytes note in review.md.)
+            #
+            # The 0.0.4 default of max_tokens=2048 silently chopped
+            # state for any bot with a rich YAML schema (NPCs with
+            # secrets_known lists, multi-section world state) — the
+            # resulting state in the DB was syntactically invalid
+            # YAML and downstream reads crashed in subtle ways.
+            # ``LLMPort.generate_response`` returns ``str`` (not a
+            # structured ``(text, finish_reason)`` tuple) so we can't
+            # detect truncation from the LLM response alone. We
+            # detect it on the way out by checking for a closing
+            # triple-backtick fence that the bot's world_state_prompt
+            # requires; if it's missing, the state was chopped
+            # mid-section by max_tokens and we flag it. The UI sees
+            # the ``[...truncated]`` marker in the debug modal and
+            # the user can hit ``/state/regenerate`` to recover the
+            # tail.
+            max_state_bytes = 4 * 1024 * 1024
+            text = response
+            truncated_at_byte_cap = len(text) > max_state_bytes
+            new_state = text[:max_state_bytes]
+            # Heuristic: if the bot's world_state_prompt asks for
+            # YAML in code fences, the assistant should close the
+            # fence on its own line. We only flag when the prompt
+            # actually asks for fenced output (so free-form prose
+            # snapshots don't get false positives).
+            asks_for_fence = "```" in (bot.world_state_prompt or "")
+            fence_unclosed = asks_for_fence and not new_state.rstrip().endswith("```")
+            if truncated_at_byte_cap:
+                logger.warning(
+                    "State for message %d truncated from %d to %d bytes",
+                    assistant_message_id,
+                    len(text),
+                    max_state_bytes,
+                )
+            if fence_unclosed:
+                new_state = new_state + "\n[...truncated — state gen hit max_tokens]"
+                logger.info(
+                    "State for message %d flagged truncated (no closing fence)",
+                    assistant_message_id,
+                )
+            await self._messages.update_state(assistant_message_id, new_state)
+            logger.info(
+                "Updated state for message %d (%d bytes, truncated=%s)",
+                assistant_message_id,
+                len(new_state),
+                truncated_at_byte_cap or fence_unclosed,
+            )
+        except Exception:
+            # State is a convenience, not an invariant. Log and
+            # move on — the chat itself succeeded, the user is
+            # reading the response, and a future manual regenerate
+            # call can fill in the gap.
+            logger.exception(
+                "regenerate_state failed for message %d",
+                assistant_message_id,
+            )
+
+    async def _load_assistant_content(self, thread_id: int, message_id: int) -> str:
+        """Read the persisted assistant content for a message id.
+
+        Used by ``regenerate_state`` to feed the LLM the same text
+        the user already saw. Falls back to ``""`` if the message
+        was deleted or the read fails — the state-update task is
+        fire-and-forget, so a missing message shouldn't crash it.
+
+        Cheap implementation: pulls the thread's tail and filters in
+        Python. ``history_limit`` caps the window so this stays O(1)
+        for reasonable thread lengths. A dedicated single-message
+        ``MessageRepository.get`` would be marginally faster but
+        would add a new method to the Protocol for one caller.
+        """
+        try:
+            history = await self._messages.list_for_thread(
+                thread_id=thread_id,
+                limit=self._settings.history_limit,
+            )
+        except Exception:
+            return ""
+        for m in history:
+            if m.id == message_id:
+                return m.content or ""
+        return ""
 
     async def run_summarization(self, thread_id: int) -> None:
         """Summarize recent messages and optionally update thread summary.
@@ -1093,6 +1366,20 @@ class ChatService:
             if last_user_msg_id is not None:
                 uploaded_files = await self._files.list_for_message(last_user_msg_id)
 
+        # Pull the world-state snapshot from the previous assistant
+        # turn so the orchestrator can inject it as a system message
+        # right after the floating reminder (see
+        # ``langgraph_orchestrator._node_user_input``). Iterating in
+        # reverse because the previous assistant turn is the most
+        # recent ``role == "assistant"`` in the loaded history;
+        # ``for-else`` falls through cleanly when no assistant turn
+        # exists yet (very first user message of a new thread).
+        prev_world_state = ""
+        for msg in reversed(history):
+            if msg.role == "assistant":
+                prev_world_state = (msg.state or "").strip()
+                break
+
         return ConversationRequest(
             thread_id=command.thread_id,
             bot_id=command.bot_id,
@@ -1110,6 +1397,9 @@ class ChatService:
             temperature=settings.default_temperature,
             uploaded_files=uploaded_files,
             mes_example=getattr(bot, "mes_example", "") or "",
+            dynamic_system_prompt=getattr(bot, "dynamic_system_prompt", "") or "",
+            world_state_prompt=getattr(bot, "world_state_prompt", "") or "",
+            prev_world_state=prev_world_state,
         )
 
     # ── Section 8: Branch-aware deletion helpers ─────────────────────

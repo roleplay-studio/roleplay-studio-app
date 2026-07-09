@@ -78,6 +78,13 @@ class BotResponse(BaseModel):
     bot_type: str = "rp"
     alternate_greetings: list[str] = Field(default_factory=list)
     mes_example: str = ""
+    # Floating system reminder + world-state prompt. Empty string
+    # by default — bots that don't use the feature omit them. The
+    # ``from_orm_bot`` factory pulls both from the SQLAlchemy row via
+    # ``getattr`` so older bots that predate the columns still
+    # deserialise cleanly.
+    dynamic_system_prompt: str = ""
+    world_state_prompt: str = ""
 
     @classmethod
     def from_orm_bot(
@@ -135,6 +142,8 @@ class BotResponse(BaseModel):
             bot_type=bot.bot_type or BotType.RP,
             alternate_greetings=alt_greetings,
             mes_example=getattr(bot, "mes_example", "") or "",
+            dynamic_system_prompt=getattr(bot, "dynamic_system_prompt", "") or "",
+            world_state_prompt=getattr(bot, "world_state_prompt", "") or "",
         )
 
 
@@ -151,6 +160,19 @@ class MessageDTO(BaseModel):
     # created before the column existed). The frontend hides the
     # reasoning panel when this is missing/empty.
     reasoning: str | None = None
+    # Per-message world-state snapshot (opaque string). Populated by
+    # the background state-update task after each assistant response;
+    # ``None`` for older messages that predate the feature and for
+    # messages where the bot has no ``world_state_prompt``. The bot
+    # author owns the output format via ``Bot.world_state_prompt`` —
+    # we do not parse, validate, or constrain it.
+    state: str | None = None
+    # Captured at stream time so the chat UI can show what was
+    # actually sent to the LLM. Set on assistant messages only when
+    # the bot has a non-empty ``dynamic_system_prompt`` (the field is
+    # populated by the orchestrator's post-stream refresh path,
+    # parallel to how ``reasoning`` is captured today).
+    dynamic_system_prompt: str | None = None
     created_at: datetime | None = None
     branch_group: str | None = None
     branch_index: int = 0
@@ -212,6 +234,8 @@ class CreateBotCommand(BaseModel):
     bot_type: str = "rp"
     alternate_greetings: list[str] = Field(default_factory=list)
     mes_example: str = ""
+    dynamic_system_prompt: str = ""
+    world_state_prompt: str = ""
 
 
 class UpdateBotCommand(CreateBotCommand):
@@ -338,6 +362,26 @@ class ConversationRequest(BaseModel):
     mes_example: str = ""
     temperature: float | None = None  # Override temperature
     uploaded_files: list[ThreadFileDTO] = Field(default_factory=list)
+    # Floating system reminder injected right before the last user turn.
+    # Empty string = no floating prompt (default for bots that don't
+    # use the feature). Variable substitution (``{{char}}`` /
+    # ``{{user}}``) is applied by the orchestrator.
+    dynamic_system_prompt: str = ""
+    # System prompt for the background state-update task. The bot
+    # developer owns the output format. Empty string = skip the
+    # background state task entirely.
+    world_state_prompt: str = ""
+    # World-state snapshot from the previous assistant turn in this
+    # thread. The chat service fills this from ``history`` (the
+    # most-recent ``assistant`` message's ``state`` column) before
+    # handing off to the orchestrator. Empty string when there's
+    # no prior assistant turn, the bot hasn't produced a state yet,
+    # or state-update was disabled (no ``world_state_prompt``).
+    # The orchestrator turns this into a ``system`` message with a
+    # ``[World state from previous turn]`` prefix, right after the
+    # floating reminder so the LLM sees the freshest world context
+    # before the new user turn.
+    prev_world_state: str = ""
 
 
 # ── File Upload DTO ─────────────────────────────────────────────────

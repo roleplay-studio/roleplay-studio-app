@@ -15,19 +15,20 @@ markdown-repair code path), see ``_NullMarkdownRepairer`` in
 
 from __future__ import annotations
 
-from format_standart_rp import fix_markdown
+from format_standart_rp import format_roleplay
 
 
 class FormatStandartRpRepairer:
-    """Default ``MarkdownRepairer`` backed by the
-    ``format-standart-rp`` library."""
+    """Adapter around the external ``format_standart_rp`` library.
+
+    Wraps ``format_roleplay`` (the roleplay-style prose repairer).
+    The library's other helper, ``fix_markdown``, is the close-or-
+    strip function used by older code paths; we use
+    ``format_roleplay`` here because it applies a prose-style
+    transformation that fits the roleplay chat use-case better
+    (it normalises asterisks around actions and quotation marks
+    around speech).
+    """
 
     def repair(self, text: str, mode: str = "close") -> str:
-        """See ``MarkdownRepairer.repair`` in ports.py.
-
-        ``fix_markdown`` raises ``ValueError`` on unknown modes;
-        we let that propagate so the caller (the chat service)
-        fails fast instead of silently treating the typo as
-        ``"close"``.
-        """
-        return fix_markdown(text, fix_unclosed=mode)
+        return format_roleplay(text)

@@ -185,6 +185,8 @@ class BranchMessageRepo:
         timestamp=None,
         generation_status: str = "complete",
         reasoning: str | None = None,
+        dynamic_system_prompt: str | None = None,
+        **_extra: object,
     ) -> int | None:
         entry = self._make(
             role=role,
@@ -195,6 +197,7 @@ class BranchMessageRepo:
             created_at=timestamp,
             _tid=thread_id,
             reasoning=reasoning,
+            dynamic_system_prompt=dynamic_system_prompt,
         )
         self._msgs.append(entry)
         return entry.msg.id
@@ -339,6 +342,27 @@ class BranchMessageRepo:
         for e in self._msgs:
             if e.msg.branch_group == branch_group:
                 e.msg.is_active = False
+
+    async def get_previous_assistant_state(
+        self, thread_id, before_message_id=None
+    ) -> str:
+        """Mirrors the SQL contract — the most recent assistant's state
+        strictly before ``before_message_id`` (or any if None).
+
+        Required so the BranchMessageRepo satisfies the
+        MessageRepository Protocol when used with ChatService.
+        """
+        candidates = [
+            e.msg for e in self._msgs
+            if e.msg.role == "assistant"
+            and e.msg.state
+            and (
+                before_message_id is None
+                or (e.msg.id is not None and e.msg.id < before_message_id)
+            )
+        ]
+        candidates.sort(key=lambda m: m.id or 0, reverse=True)
+        return candidates[0].state if candidates else ""
 
 
 class FakeOrchestrator:

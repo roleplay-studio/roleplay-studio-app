@@ -4,10 +4,18 @@
   const {
     debug,
     onclose,
+    state: assistantState = null,
     usage = null,
   }: {
     debug: LLMDebugInfo;
     onclose: () => void;
+    /** Per-message world-state snapshot for the assistant turn whose
+     *  debug payload is being inspected. ``null`` when the bot has no
+     *  ``world_state_prompt`` (no background task runs) or the snapshot
+     *  hasn't landed yet. The DB column is opaque — the bot author
+     *  owns the format (YAML, JSON, prose) — so we render it
+     *  verbatim inside a pre tag without any syntax highlighting. */
+    state: null | string;
     usage: LLMUsage | null;
   } = $props();
 
@@ -94,6 +102,24 @@
           <span class="dbm-section-meta">{debug.messages.length} turns</span>
         </h4>
         <pre class="dbm-pre">{messagesJson}</pre>
+      </section>
+
+      <section class="dbm-section">
+        <h4 class="dbm-section-title">
+          World state after this turn
+          {#if assistantState}
+            <span class="dbm-section-meta">opaque snapshot</span>
+          {/if}
+        </h4>
+        {#if assistantState}
+          <pre class="dbm-pre">{assistantState}</pre>
+        {:else}
+          <div class="dbm-state-empty">
+            No world-state snapshot for this message. The bot either has
+            no <code>world_state_prompt</code> configured, or the
+            background state-update task hasn't completed yet.
+          </div>
+        {/if}
       </section>
     </div>
   </div>
@@ -281,6 +307,28 @@
     overflow: auto;
     white-space: pre-wrap;
     word-break: break-word;
+  }
+
+  /* World-state section: matches the "no data" pattern from
+     .dbm-usage-empty so the operator knows the absence is
+     intentional, not a render bug. Rendered when the bot has no
+     ``world_state_prompt`` or the background task hasn't run yet. */
+  .dbm-state-empty {
+    font-size: 12px;
+    line-height: 1.55;
+    color: var(--dbm-text-tertiary);
+    padding: 12px 14px;
+    background: var(--dbm-bg);
+    border: 1px dashed var(--dbm-border);
+    border-radius: 8px;
+  }
+  .dbm-state-empty code {
+    font-family: 'Geist Mono', 'SF Mono', ui-monospace, monospace;
+    font-size: 11px;
+    color: var(--dbm-text-secondary);
+    background: var(--dbm-pre-bg);
+    padding: 1px 5px;
+    border-radius: 4px;
   }
 
   @keyframes dbm-fade {

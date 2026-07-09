@@ -11,7 +11,7 @@ from starlette.requests import Request
 from starlette.responses import StreamingResponse
 
 from api.deps import ContainerDep
-from api.schemas import ChatRequest, RegenerateRequest
+from api.schemas import ChatRequest, RegenerateRequest, RegenerateStateRequest
 from app.application.dto import AbortResult, SendMessageCommand
 from app.application.exceptions import NotFoundError
 
@@ -449,3 +449,102 @@ async def abort_generation(
     Idempotent — returns ``was_active=false`` if no stream is running.
     """
     return await container.chat.abort_generation(thread_id)
+
+
+@router.post("/{thread_id}/state/regenerate")
+async def regenerate_state(
+    thread_id: int,
+    body: RegenerateStateRequest,
+    container: ContainerDep,
+):
+    """Manually trigger a state regeneration for an assistant message.
+
+    Useful for:
+    * catching up after the operator edits ``Bot.world_state_prompt`` —
+      existing threads can be brought up to the new schema in one click
+      per message instead of waiting for the next chat turn.
+    * tests that need to assert on the exact state shape without
+      waiting for the background task to settle.
+
+    Returns immediately after scheduling; the actual state write
+    happens in the background (fire-and-forget, same as the chat
+    path). Poll ``GET /api/threads/{id}/messages`` to see the result.
+    """
+    if container.chat is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="LLM not configured. Please set up an API key first.",
+        )
+    # We don't await — the operator asked for the action, not the
+    # result. The next ``listMessages`` will surface the fresh state.
+    # Build a minimal ConversationRequest so ``regenerate_state`` has
+    # the user input it needs (the original user message that produced
+    # this assistant turn). Pulling it from the DB rather than
+    # accepting it on the body keeps the API tight — the operator
+    # only names the assistant message they want regenerated.
+    from app.application.dto import ConversationRequest
+
+    # ``list_messages`` returns ASC chain order (oldest → newest),
+    # so the user message that triggered THIS assistant turn sits
+    # at ``history[i - 1]`` — strictly before the target. The
+    # previous comment claimed "newest-first"; that's wrong, see
+    # ``SqlAlchemyMessageRepository.list_for_thread``. Using
+    # ``history[i + 1]`` instead would pick the user turn that came
+    # AFTER the target, which is a different (and often empty)
+    # message.
+    history = await container.threads.list_messages(thread_id)
+    assistant_msg = next(
+        (m for m in history if m.id == body.assistant_message_id), None
+    )
+    if assistant_msg is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Message {body.assistant_message_id} not found in thread {thread_id}",
+        )
+    prev_user_msg = None
+    for i, m in enumerate(history):
+        if m.id == body.assistant_message_id and i > 0:
+            prev_user_msg = history[i - 1]
+            break
+    # Always resolve the bot through the thread — the MessageDTO
+    # doesn't carry bot_id today, and going through the thread keeps
+    # the route free of "is the field there yet?" branching.
+    thread = await container.threads.get_thread(thread_id)
+    if thread is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Thread {thread_id} not found",
+        )
+    bot = await container.bots.get_bot(thread.bot_id)
+    if bot is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Bot not found for this thread",
+        )
+
+    request = ConversationRequest(
+        thread_id=thread_id,
+        bot_id=bot.id or 0,
+        # Empty string is fine — regenerate_state now resolves the
+        # *previous* state via a dedicated SQL lookup, not via the
+        # request payload. The user_input field here only feeds the
+        # LLM's "what was the user asking" context; falling back to
+        # "" keeps the contract symmetric with the background path.
+        user_input=prev_user_msg.content if prev_user_msg else "",
+        bot_name=bot.name,
+        bot_personality=bot.personality,
+        bot_scenario=bot.scenario,
+        first_message=bot.first_message,
+        bot_type=bot.bot_type,
+        history=history,
+        untrusted_context=[],
+        # prev_world_state is left empty — regenerate_state resolves
+        # the prior state from the DB via get_previous_assistant_state.
+        prev_world_state="",
+        world_state_prompt=bot.world_state_prompt,
+        dynamic_system_prompt=bot.dynamic_system_prompt,
+    )
+    await container.chat.regenerate_state(
+        thread_id, body.assistant_message_id, bot, request
+    )
+    return {"ok": True, "thread_id": thread_id, "message_id": body.assistant_message_id}

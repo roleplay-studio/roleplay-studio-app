@@ -126,6 +126,19 @@ pub fn run() {
             // has the right ``.env`` and dev mode) without a fight.
             // See docs/review.md (Tauri-bundle-env-forwarding) for
             // context.
+            //
+            // m-skip-warning: if the existing backend was started
+            // without DEBUG=true (e.g. via plain ``make dev-backend``
+            // or a previous ``make dev`` session), reusing it silently
+            // means the user sees "production mode" when they
+            // launched ``make dev-debug``. The warning below makes
+            // this visible in the Tauri log so the operator can
+            // decide whether to kill the existing backend and let
+            // Tauri spawn a fresh one with the dev env. The fast
+            // path is still the right default — the alternative
+            // (always spawn) breaks the standard ``make dev`` +
+            // ``make dev-tauri`` flow by leaving a zombie process
+            // on the port when Tauri exits.
             let port_in_use = std::net::TcpStream::connect_timeout(
                 &format!("127.0.0.1:{BACKEND_PORT}").parse().unwrap(),
                 std::time::Duration::from_millis(100),
@@ -134,6 +147,23 @@ pub fn run() {
             if port_in_use {
                 log::info!(
                     "Port {port} already in use — skipping bundled-backend spawn (assuming dev backend is up)",
+                    port = BACKEND_PORT
+                );
+                // m-skip-warning-2: surface this prominently. The
+                // operator may not know that an older dev backend
+                // is still bound to the port, in which case their
+                // ``make dev-debug`` will silently see the older
+                // backend's env (no DEBUG, no ENVIRONMENT). We log
+                // to stderr too because the in-app logger only
+                // appears in ``tauri dev`` output and the operator
+                // might be running a packaged Tauri where the log
+                // file is the only way to see this.
+                log::warn!(
+                    "Connected to EXISTING backend on {port} — its DEBUG/ENVIRONMENT is whatever it was started with. If you expected dev-debug, kill the old backend and re-run.",
+                    port = BACKEND_PORT
+                );
+                eprintln!(
+                    "[tauri] warning: existing backend on port {port} — env vars (DEBUG, ENVIRONMENT) come from THAT process, not this Tauri launch",
                     port = BACKEND_PORT
                 );
                 app.manage(BackendProcess(Mutex::new(None)));

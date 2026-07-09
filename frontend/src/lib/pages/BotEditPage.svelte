@@ -28,7 +28,7 @@
   let lang = $state('en');
 
   // Tabs
-  let activeTab: 'edit' | 'knowledge' | 'versions' = $state('edit');
+  let activeTab: 'edit' | 'knowledge' | 'prompts' | 'versions' = $state('edit');
 
   // Form fields
   let formName = $state('');
@@ -41,6 +41,8 @@
   // sent to the backend). `mesExampleOpen` controls whether the editor
   // section is visible; collapsed when the value is empty.
   let formMesExample = $state('');
+  let formDynamicSystemPrompt = $state('');
+  let formWorldStatePrompt = $state('');
   let mesExampleOpen = $state(false);
   let mesExampleMode: 'raw' | 'visual' = $state('visual');
   let formScenario = $state('');
@@ -112,6 +114,8 @@
         formBotType = b.bot_type || 'rp';
         formMesExample = b.mes_example || '';
         mesExampleOpen = !!formMesExample;
+        formDynamicSystemPrompt = b.dynamic_system_prompt || '';
+        formWorldStatePrompt = b.world_state_prompt || '';
       }
     } catch (e) {
       console.error('Failed to load bot', e);
@@ -163,11 +167,13 @@
       bot_type: formBotType,
       categories: formCategories,
       description: formDescription || '',
+      dynamic_system_prompt: formDynamicSystemPrompt || '',
       first_message,
       mes_example: formMesExample || '',
       name: formName,
       personality: formPersonality,
       scenario: formScenario || '',
+      world_state_prompt: formWorldStatePrompt || '',
     };
     try {
       await api.updateBot(bot.id, payload);
@@ -462,6 +468,18 @@
         <span class="tab-icon">🕒</span>
         <span class="tab-label">{t('bot_versions.title', lang)}</span>
       </button>
+      <button
+        class="edit-tab"
+        class:active={activeTab === 'prompts'}
+        onclick={() => (activeTab = 'prompts')}
+        data-testid="bot-edit-tab-prompts"
+      >
+        <span class="tab-icon">✨</span>
+        <span class="tab-label">{t('bot_edit.tab_prompts', lang)}</span>
+        {#if formDynamicSystemPrompt.trim() || formWorldStatePrompt.trim()}
+          <span class="tab-badge" aria-label="has custom prompts"></span>
+        {/if}
+      </button>
     </nav>
 
     <!-- Tab: Configuration -->
@@ -653,6 +671,7 @@
             />
           </div>
         </div>
+
         <!-- Section: Example dialogues (V1/V2/V3 mes_example) -->
         <div class="mes-section">
           <h3>{t('bot_edit.mes_example', lang)}</h3>
@@ -1026,6 +1045,46 @@
           </div>
         </div>
       </section>
+    {:else if activeTab === 'prompts'}
+      <!-- Tab: Advanced prompts. The two fields that control long-chat
+           stability (floating system reminder) and per-message state
+           snapshots (background state generation). Hidden behind a
+           separate tab so the main config form stays focused on
+           identity/persona/scenario; power-users opt in. -->
+      <section class="edit-section">
+        <div class="ray-card">
+          <div class="prompts-intro">
+            <p>{t('bot_edit.prompts_intro', lang)}</p>
+          </div>
+
+          <!-- Floating system prompt — injected right before the last
+               user message on every request. Solves instruction drift
+               in long chats where the bot stops following its
+               personality after 100+ messages. -->
+          <div class="field-group">
+            <label class="field-label">{t('bot_edit.dynamic_system_prompt', lang)}</label>
+            <Textarea
+              bind:value={formDynamicSystemPrompt}
+              hint={t('bot_edit.dynamic_system_prompt_hint', lang)}
+              rows={4}
+              placeholder={'e.g. Always stay in character. Speak only as {{char}}.'}
+            />
+          </div>
+
+          <!-- World-state prompt — system prompt for the background
+               task that updates Conversation.state. The bot author
+               owns the output format (YAML, JSON, prose). Empty
+               string = no background state generation. -->
+          <div class="field-group">
+            <label class="field-label">{t('bot_edit.world_state_prompt', lang)}</label>
+            <Textarea
+              bind:value={formWorldStatePrompt}
+              rows={6}
+              placeholder="e.g. Emit a YAML block with keys: location, time_of_day, present_characters."
+            />
+          </div>
+        </div>
+      </section>
     {:else if activeTab === 'versions'}
       <section class="edit-section">
         <div class="ray-card">
@@ -1215,6 +1274,34 @@
   }
   .tab-label {
     font-size: 14px;
+  }
+
+  /* Small dot on a tab indicates the bot has data in that section.
+     Used for the Advanced prompts tab so a configured dynamic /
+     world-state prompt is visible at a glance. */
+  .tab-badge {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--ray-accent, #8b5cf6);
+    margin-left: 6px;
+    flex-shrink: 0;
+  }
+
+  /* Tab intro paragraph — small lead-in copy that frames the two
+     fields below it. Lives at the top of the Advanced prompts card
+     so the operator knows what the tab is for before reading the
+     form fields. */
+  .prompts-intro p {
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--ray-text-secondary);
+    margin: 0 0 16px;
+    padding: 12px 14px;
+    background: color-mix(in srgb, var(--ray-accent, #8b5cf6) 6%, transparent);
+    border-radius: 8px;
+    border: 1px solid color-mix(in srgb, var(--ray-accent, #8b5cf6) 14%, transparent);
   }
 
   /* ─── Section ─── */

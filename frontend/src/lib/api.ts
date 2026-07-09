@@ -114,6 +114,9 @@ export interface Bot {
    *  Empty array when every category is currently valid. */
   categories_invalid: string[];
   description: string;
+  /** Floating system reminder injected right before the last user turn on
+   *  every chat request. Empty string = no floating prompt (default). */
+  dynamic_system_prompt?: string;
   first_message: string;
   id: number;
   /** V1/V2/V3 character card `mes_example` — few-shot dialogue examples.
@@ -124,21 +127,27 @@ export interface Bot {
   personality: string;
   scenario: string;
   thread_count: number;
+  /** System prompt for the background state-update task. The bot
+   *  developer owns the output format via this prompt. Empty string =
+   *  no background state generation. */
+  world_state_prompt?: string;
 }
 
 /** The shape of the serialized bot inside a version snapshot. Mirrors
- *  the editable fields of `Bot` — id and relationships are omitted. */
+ * the editable fields of `Bot` — id and relationships are omitted. */
 export interface BotSnapshot {
   alternate_greetings: string[];
   avatar_path: null | string;
   bot_type: BotType;
   categories: string[];
   description: string;
+  dynamic_system_prompt: string;
   first_message: string;
   mes_example: string;
   name: string;
   personality: string;
   scenario: string;
+  world_state_prompt: string;
 }
 
 /** A snapshot of a Bot at the moment of capture. */
@@ -189,6 +198,10 @@ export interface Message {
   branch_index: number;
   content: string;
   created_at: null | string;
+  /** Captured at stream time so the chat UI can render the floating
+   *  prompt panel. Set on assistant messages only when the bot has a
+   *  non-empty dynamic_system_prompt. */
+  dynamic_system_prompt?: null | string;
   id: null | number;
   is_active: boolean;
   /** Chain-of-thought from a reasoning-capable LLM (DeepSeek, QwQ, ...).
@@ -199,6 +212,12 @@ export interface Message {
   reasoning?: string;
   role: 'assistant' | 'system' | 'user';
   short_content: string;
+  /** Per-message world-state snapshot (opaque string — bot author
+   *  owns the format via ``Bot.world_state_prompt``). Populated by the
+   *  background state-update task after each assistant response;
+   *  undefined on messages that predate the feature or where the bot
+   *  has no world_state_prompt. */
+  state?: null | string;
   versions?: Message[];
 }
 
@@ -634,14 +653,18 @@ export const api = {
   updateBot: (
     id: number,
     data: {
+      alternate_greetings?: string[];
       avatar_path?: null | string;
       bot_type?: BotType;
       categories?: string[];
       description?: string;
+      dynamic_system_prompt?: string;
       first_message: string;
+      mes_example?: string;
       name: string;
       personality: string;
       scenario?: string;
+      world_state_prompt?: string;
     },
   ) => request<{ ok: boolean }>(`/api/bots/${id}`, { body: JSON.stringify(data), method: 'PUT' }),
 

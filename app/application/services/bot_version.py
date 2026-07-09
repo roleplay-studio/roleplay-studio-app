@@ -86,6 +86,8 @@ def serialize_bot(bot: Bot) -> str:
         "bot_type": bot.bot_type or "rp",
         "alternate_greetings": alt,
         "mes_example": getattr(bot, "mes_example", "") or "",
+        "dynamic_system_prompt": getattr(bot, "dynamic_system_prompt", "") or "",
+        "world_state_prompt": getattr(bot, "world_state_prompt", "") or "",
     }
     return json.dumps(payload, ensure_ascii=False)
 
@@ -178,6 +180,17 @@ class BotVersionService:
 
         # 2. Apply the snapshot.
         data = deserialize_snapshot(version.snapshot_json)
+        # For fields added in 0.0.4 (floating system prompt + world
+        # state prompt) we use ``None`` as the sentinel for "this
+        # snapshot predates the field". The SQL repository treats
+        # ``None`` as "don't touch the live value" (see
+        # ``SqlAlchemyBotRepository.update``), so a pre-0.0.4 snapshot
+        # round-trips without wiping the bot's live prompts. An
+        # explicit ``""`` in the snapshot DOES clear the field — the
+        # operator authored that snapshot knowing they wanted to
+        # blank it. Caught by ``test_restore_old_snapshot_preserves_new_fields``.
+        dynamic_prompt = data.get("dynamic_system_prompt")
+        world_state_prompt = data.get("world_state_prompt")
         await self._bots.update(
             version.bot_id,
             name=data.get("name", ""),
@@ -190,6 +203,8 @@ class BotVersionService:
             bot_type=data.get("bot_type", "rp"),
             alternate_greetings=data.get("alternate_greetings") or [],
             mes_example=data.get("mes_example", ""),
+            dynamic_system_prompt=dynamic_prompt,
+            world_state_prompt=world_state_prompt,
         )
         return version
 

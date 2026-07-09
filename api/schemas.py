@@ -36,6 +36,8 @@ class UpdateBotRequest(BaseModel):
     bot_type: BotType = BotType.RP
     alternate_greetings: list[str] = Field(default_factory=list)
     mes_example: str | None = None
+    dynamic_system_prompt: str = ""
+    world_state_prompt: str = ""
 
 
 class ChatRequest(BaseModel):
@@ -65,6 +67,17 @@ class RegenerateRequest(BaseModel):
     persona_id: int | None = None
 
 
+class RegenerateStateRequest(BaseModel):
+    """Body for the manual state-regeneration endpoint.
+
+    The assistant message id is enough — the orchestrator looks up the
+    parent thread, the previous assistant message (for the prior state),
+    and the bot (for ``world_state_prompt``).
+    """
+
+    assistant_message_id: int
+
+
 # ── Bot Export / Import ──────────────────────────────────────────────────
 
 
@@ -79,6 +92,11 @@ class BotExportData(BaseModel):
     scenario: str = ""
     categories: list[str] = Field(default_factory=list)
     bot_type: str = "rp"
+    # Round-tripped through export/import so a bot created on machine
+    # A keeps its floating prompt and state-gen schema on machine B.
+    # Empty string = feature not used by this bot (default).
+    dynamic_system_prompt: str = ""
+    world_state_prompt: str = ""
 
 
 class ImportBotRequest(BaseModel):
@@ -93,6 +111,8 @@ class ImportBotRequest(BaseModel):
     categories: list[str] = Field(default_factory=list)
     bot_type: str = "rp"
     knowledge: list[str] | None = None
+    dynamic_system_prompt: str = ""
+    world_state_prompt: str = ""
 
 
 # ── Settings / Categories ─────────────────────────────────────────

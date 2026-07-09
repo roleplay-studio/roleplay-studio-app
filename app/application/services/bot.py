@@ -29,6 +29,8 @@ class BotService:
             bot_type=command.bot_type,
             alternate_greetings=command.alternate_greetings,
             mes_example=command.mes_example,
+            dynamic_system_prompt=command.dynamic_system_prompt,
+            world_state_prompt=command.world_state_prompt,
         )
 
     async def update_bot(self, command: UpdateBotCommand) -> None:
@@ -54,6 +56,8 @@ class BotService:
             bot_type=command.bot_type,
             alternate_greetings=command.alternate_greetings,
             mes_example=command.mes_example,
+            dynamic_system_prompt=command.dynamic_system_prompt,
+            world_state_prompt=command.world_state_prompt,
         )
 
         # 2. Auto-version: only if a version repo is wired AND the

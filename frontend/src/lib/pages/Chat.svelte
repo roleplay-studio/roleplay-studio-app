@@ -1408,9 +1408,11 @@
   <DeleteConfirmModal show={showDeleteConfirm} onconfirm={executeDelete} oncancel={cancelDelete} />
 
   {#if openDebugId !== null && debugByMessage[openDebugId]}
+    {@const debugMsg = messages.find((m) => m.id === openDebugId)}
     <LLMDebugModal
       debug={debugByMessage[openDebugId]}
       usage={usageByMessage[openDebugId] ?? null}
+      state={debugMsg?.state ?? null}
       onclose={closeDebugModal}
     />
   {/if}
