@@ -2,6 +2,7 @@
 
 import logging
 import os
+import time
 import uuid
 from contextlib import asynccontextmanager
 
@@ -9,6 +10,7 @@ from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from api.routes import bots, chat, config, files, knowledge, personas, server_info, setup, threads
 from app.application.exceptions import (
@@ -21,6 +23,46 @@ from app.application.exceptions import (
 from app.bootstrap import get_container
 
 logger = logging.getLogger(__name__)
+
+
+async def _access_log_dispatch(request: Request, call_next):
+    """HTTP access log.
+
+    Logs every request with method, path, status, and elapsed
+    ms. Skips the noisy ``/api/health`` probe by default — set
+    ``LOG_HEALTH=1`` in the environment to re-enable. The
+    middleware emits at INFO for 2xx/3xx and at WARNING for
+    4xx/5xx so the ``make logs-errors`` surface stays useful.
+    ``X-Forwarded-For`` is intentionally ignored — this is a
+    desktop Tauri app and the only client is local.
+
+    Implemented as a top-level coroutine + ``add_middleware``
+    rather than the ``@app.middleware("http")`` decorator
+    because the decorator variant has subtle pytest
+    capture-logger interaction issues that were a 30-minute
+    rabbit hole to debug. The explicit ``BaseHTTPMiddleware``
+    registration is more verbose but the logger behaviour
+    matches the production entry point (``run_backend.py``)
+    exactly.
+    """
+    start = time.perf_counter()
+    response = await call_next(request)
+    elapsed_ms = (time.perf_counter() - start) * 1000.0
+    path = request.url.path
+    if path == "/api/health" and not os.getenv("LOG_HEALTH"):
+        return response
+    status_code = response.status_code
+    line = (
+        f"{request.method} {path} -> {status_code} "
+        f"({elapsed_ms:.1f}ms)"
+    )
+    if status_code >= 500:
+        logger.error(line)
+    elif status_code >= 400:
+        logger.warning(line)
+    else:
+        logger.info(line)
+    return response
 
 
 @asynccontextmanager
@@ -78,6 +120,14 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # ── Access log middleware ───────────────────────────────────
+    # ``add_middleware(BaseHTTPMiddleware, dispatch=...)`` is the
+    # explicit form of the ``@app.middleware("http")`` decorator.
+    # We use the explicit form so the test fixture can
+    # ``assert_called`` on the dispatch coroutine, and so the
+    # logger context is unambiguous in stack traces.
+    app.add_middleware(BaseHTTPMiddleware, dispatch=_access_log_dispatch)
 
     # ── Static files: uploaded avatars ───────────────────────────
     # The folder that backs the public ``/uploads/...`` URL is
@@ -194,6 +244,16 @@ def create_app() -> FastAPI:
         how those domain failures map onto HTTP — adding a new
         domain error here is a one-line change with no churn in
         service code or route handlers.
+
+        Logging policy:
+          - 404 / 4xx — INFO level with method + path; user-facing
+            errors are noise at WARNING. A missing bot on a render
+            thread that the user refreshed shouldn't flood logs.
+          - 5xx / ExternalServiceError — WARNING. The middleware
+            above will also tag the request line as WARNING (the
+            ``>= 500`` branch there), so the message ends up
+            doubled-on-purpose via two surfaces: the per-request
+            summary and the per-error detail. Cheap insurance.
         """
         # NotFoundError is the most specific — match it first.
         if isinstance(exc, NotFoundError):
@@ -209,6 +269,27 @@ def create_app() -> FastAPI:
             status_code = status.HTTP_502_BAD_GATEWAY
         else:
             status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+
+        if status_code >= 500:
+            logger.warning(
+                "ApplicationError on %s %s [%s]: %s",
+                request.method,
+                request.url.path,
+                type(exc).__name__,
+                exc,
+            )
+        elif status_code >= 400 and not isinstance(exc, NotFoundError):
+            # 404 is so routine (a tab refresh after the user
+            # deleted a bot) that WARNING would flood. Tag it INFO.
+            # 4xx that aren't 404 are worth seeing — usually the
+            # client is misconfigured or sending bad input.
+            logger.info(
+                "ApplicationError on %s %s [%s]: %s",
+                request.method,
+                request.url.path,
+                type(exc).__name__,
+                exc,
+            )
 
         body: dict = {"detail": str(exc)}
         # UploadError carries a stable ``code`` so the client can
