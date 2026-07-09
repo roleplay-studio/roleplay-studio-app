@@ -1420,15 +1420,28 @@ class ChatService:
         # Pull the world-state snapshot from the previous assistant
         # turn so the orchestrator can inject it as a system message
         # right after the floating reminder (see
-        # ``langgraph_orchestrator._node_user_input``). Iterating in
-        # reverse because the previous assistant turn is the most
-        # recent ``role == "assistant"`` in the loaded history;
-        # ``for-else`` falls through cleanly when no assistant turn
-        # exists yet (very first user message of a new thread).
+        # ``langgraph_orchestrator._node_user_input``).
+        #
+        # Important: skip assistant messages whose ``state`` is
+        # empty / None. A regenerate target may sit behind an
+        # assistant whose state-update hasn't landed yet (or got
+        # lost to a crash), or a hand-inserted row in tests may
+        # have no state. The previous-turn state must come from
+        # an assistant that actually has one — otherwise we'd
+        # feed an empty / stale block into the prompt and the
+        # LLM would hallucinate a fresh world from nothing.
+        # The ``state-update`` regenerator uses
+        # ``get_previous_assistant_state`` for the same reason —
+        # we keep them aligned by reading the ``MessageDTO``
+        # ``state`` attribute on the active, branch-filtered
+        # history that ``list_for_thread`` already produced.
         prev_world_state = ""
         for msg in reversed(history):
-            if msg.role == "assistant":
-                prev_world_state = (msg.state or "").strip()
+            if msg.role != "assistant":
+                continue
+            candidate = (msg.state or "").strip()
+            if candidate:
+                prev_world_state = candidate
                 break
 
         return ConversationRequest(
