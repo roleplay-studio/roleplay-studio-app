@@ -1422,23 +1422,31 @@ class ChatService:
         # right after the floating reminder (see
         # ``langgraph_orchestrator._node_user_input``).
         #
-        # Important: skip assistant messages whose ``state`` is
-        # empty / None. A regenerate target may sit behind an
-        # assistant whose state-update hasn't landed yet (or got
-        # lost to a crash), or a hand-inserted row in tests may
-        # have no state. The previous-turn state must come from
-        # an assistant that actually has one — otherwise we'd
-        # feed an empty / stale block into the prompt and the
-        # LLM would hallucinate a fresh world from nothing.
-        # The ``state-update`` regenerator uses
-        # ``get_previous_assistant_state`` for the same reason —
-        # we keep them aligned by reading the ``MessageDTO``
-        # ``state`` attribute on the active, branch-filtered
-        # history that ``list_for_thread`` already produced.
+        # Skip messages whose ``state`` is empty / None / whitespace.
+        # A regenerate target may sit behind an assistant whose
+        # state-update hasn't landed yet (or got lost to a crash),
+        # or a hand-inserted row in tests may have no state. The
+        # previous-turn state must come from an assistant that
+        # actually has one — otherwise we'd feed an empty / stale
+        # block into the prompt and the LLM would hallucinate a
+        # fresh world from nothing. The ``state-update``
+        # regenerator uses ``get_previous_assistant_state`` for
+        # the same reason — we keep them aligned by reading the
+        # ``MessageDTO`` ``state`` attribute on the active,
+        # branch-filtered history that ``list_for_thread``
+        # already produced.
+        #
+        # Role filter: ``MessageDTO.role`` is ``Literal["system",
+        # "user", "assistant"]``, but only ``assistant`` rows ever
+        # have a non-empty ``state`` (the state-update task only
+        # targets them, and ``Conversation.state`` is only written
+        # via ``update_state`` / the regenerator). We trust that
+        # invariant here instead of gating on ``role`` explicitly —
+        # the ``candidate`` non-empty check filters both
+        # non-assistant rows AND empty-state assistants out in one
+        # pass.
         prev_world_state = ""
         for msg in reversed(history):
-            if msg.role != "assistant":
-                continue
             candidate = (msg.state or "").strip()
             if candidate:
                 prev_world_state = candidate
