@@ -784,14 +784,30 @@ class SqlAlchemyMessageRepository:
 
         Returns ``""`` when no such state exists.
 
-        Implementation note: a single targeted query (``WHERE role='assistant'
-        AND state IS NOT NULL AND state != '' ORDER BY id DESC LIMIT 1``)
-        is far cheaper and safer than ``list_for_thread(limit=2)`` —
-        the latter returns the two newest rows in DESC, which can both
-        be user messages if the conversation just had two consecutive
-        user turns (e.g. an edit that landed as a fresh insert), and
-        the caller would silently fall through to ``previous_state=""``
-        even though a perfectly valid state exists further back.
+        Implementation notes:
+
+        1. A single targeted query (``WHERE role='assistant'
+           AND state IS NOT NULL AND state != '' ORDER BY id DESC LIMIT 1``)
+           is far cheaper and safer than ``list_for_thread(limit=2)`` —
+           the latter returns the two newest rows in DESC, which can both
+           be user messages if the conversation just had two consecutive
+           user turns (e.g. an edit that landed as a fresh insert), and
+           the caller would silently fall through to ``previous_state=""``
+           even though a perfectly valid state exists further back.
+
+        2. **Active-branch filter.** We must constrain the lookup to
+           messages on the *active* branch — the state-update
+           regenerator feeds the LLM the previous turn's snapshot so
+           it can carry world state across the conversation. A
+           regenerate / retry creates a new ``branch_group`` and
+           deactivates the old one (``is_active=False``); without
+           this filter, ``get_previous_assistant_state`` would happily
+           hand back a state from the stale inactive branch and the
+           regenerator would hallucinate a world-state carryover that
+           doesn't match what's actually on screen. Same applies to
+           messages with no ``branch_group`` — those are the
+           pre-branching legacy rows and they're always considered
+           active (they're the trunk).
         """
         async with self._store._async_session_factory() as session:
             conditions = [
@@ -799,6 +815,13 @@ class SqlAlchemyMessageRepository:
                 Conversation.role == "assistant",
                 Conversation.state.isnot(None),
                 Conversation.state != "",
+                # Branch-aware filter. ``branch_group IS NULL`` means
+                # the message predates branching and is always
+                # considered part of the active chain; otherwise
+                # only ``is_active=True`` rows count. The mirror
+                # condition lives in ``list_for_thread`` so the chat
+                # UI and the LLM see the same world.
+                (Conversation.branch_group.is_(None)) | (Conversation.is_active.is_(True)),
             ]
             if before_message_id is not None:
                 conditions.append(Conversation.id < before_message_id)

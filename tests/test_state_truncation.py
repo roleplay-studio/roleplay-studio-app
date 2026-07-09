@@ -96,6 +96,12 @@ def _make_bot():
     bot.id = 1
     bot.world_state_prompt = WORLD_STATE_PROMPT
     bot.dynamic_system_prompt = ""
+    # Truncation is an RP feature — the test exercises the
+    # regenerate_state path that the .0.0.5 RP-only gate
+    # guards. Bots that aren't ``RP`` short-circuit at the
+    # gate and never reach the LLM call, so we must declare
+    # the bot as RP for the truncation check to even run.
+    bot.bot_type = "rp"
     return bot
 
 
@@ -190,13 +196,15 @@ async def test_freeform_prose_state_is_not_flagged() -> None:
 
 
 @pytest.mark.asyncio
-async def test_max_tokens_uses_4096_not_2048() -> None:
-    """Regression guard: 0.0.4 used ``max_tokens=2048``, which is
-    too small for bots with rich YAML schemas (NPCs with
-    secrets_known lists, multi-section world state). The fix
-    bumped it to 4096 — this test pins that the request carries
-    the higher value so a future refactor can't quietly drop it
-    back down.
+async def test_max_tokens_is_at_least_8192() -> None:
+    """Regression guard: state gen must request enough max_tokens
+    to fit a long-running roleplay world state. The 0.0.4 default
+    of 2048 silently chopped it mid-section; the .0.0.5 bump to
+    4096 was still too tight for sessions with NPC secrets_known
+    lists and multi-section world state. We use 8192 here so a
+    state snapshot of 6+ KiB of YAML doesn't get truncated
+    silently. Pin the lower bound — bump up freely, don't drop
+    back down without a test.
     """
     bot = _make_bot()
     bots = _FakeBotsRepo(bot)
@@ -213,7 +221,8 @@ async def test_max_tokens_uses_4096_not_2048() -> None:
     svc = ChatService(bots=bots, messages=msgs, knowledge=None, orchestrator=None, llm=_LLM())
     await svc.regenerate_state(thread_id=1, assistant_message_id=42, bot=bot, request=_make_request())
 
-    assert captured.get("max_tokens") == 4096, (
-        f"regenerate_state must request max_tokens=4096 to avoid silent "
-        f"truncation of rich YAML schemas; got {captured.get('max_tokens')!r}"
+    actual = captured.get("max_tokens")
+    assert actual is not None and actual >= 8192, (
+        f"regenerate_state must request max_tokens>=8192 to fit a "
+        f"long-running RP world state; got {actual!r}"
     )
