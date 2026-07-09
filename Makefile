@@ -56,12 +56,34 @@ dev: ## Run backend (prod mode) + Tauri desktop in one command
 	$(MAKE) dev-backend
 	$(MAKE) dev-tauri
 
+# `dev-debug` keeps the backend in the FOREGROUND so Python logger
+# output (structlog + uvicorn + our own loggers) streams straight to
+# the terminal. The previous design backgrounded the backend and
+# piped to ``logs/backend.log``, which was fine for a quick ``make
+# dev`` smoke test but made ``dev-debug`` useless for live error
+# triage — you'd have to alt-tab into another terminal and tail
+# the file. Now the tail is the terminal you're in.
+#
+# Tauri stays in the background because it opens a window and would
+# otherwise block this Make target from returning. If you need the
+# backend logs even *after* Tauri takes over the screen, run
+# ``make logs`` in another shell to follow the file.
 .PHONY: dev-debug
 dev-debug: export DEBUG := true
 dev-debug: export ENVIRONMENT := development
-dev-debug: ## Run backend with DEBUG=true + Tauri desktop
-	$(MAKE) dev
-	@echo "[dev-debug] backend has DEBUG=$(DEBUG) ENVIRONMENT=$(ENVIRONMENT) in its env"
+dev-debug: ## Run backend in FOREGROUND (DEBUG=true) + Tauri in background
+	$(MAKE) -j2 dev-backend-debug-fg dev-tauri
+
+# Foreground backend variant for ``dev-debug`` (live Python logger
+# output in the terminal). Unlike ``dev-backend`` it does not
+# background the process and does not write a pidfile — when you
+# Ctrl-C this make target, the backend dies with the make process
+# and you can rerun cleanly.
+.PHONY: dev-backend-debug-fg
+dev-backend-debug-fg: ## Start backend in foreground (live logs) — used by dev-debug
+	@mkdir -p logs
+	@echo "[backend] starting in foreground (DEBUG=$(DEBUG) ENVIRONMENT=$(ENVIRONMENT)) — Ctrl-C to stop"
+	@$(PY) backend/run_backend.py 2>&1 | tee logs/backend.log
 
 .PHONY: dev-tauri
 dev-tauri: ## Run Tauri desktop (assumes backend is already up)
@@ -83,6 +105,28 @@ dev-backend: ## Start backend in background, write logs to logs/backend.log
 	  echo $$! > .backend.pid; \
 	  echo "[backend] started (PID $$(cat .backend.pid)) — logs at logs/backend.log"; \
 	fi
+
+# Follow the live backend log without restarting the server. Useful
+# in a second terminal while ``make dev`` is running, or for
+# post-mortem after a crash.
+.PHONY: logs
+logs: ## Tail the backend log (Ctrl-C to stop following)
+	@if [ ! -f logs/backend.log ]; then \
+	  echo "[logs] no logs/backend.log yet — run \`make dev\` or \`make dev-debug\` first"; \
+	  exit 1; \
+	fi
+	@tail -n +1 -f logs/backend.log
+
+# Same as ``logs`` but only ERROR / WARNING lines — useful when
+# you want to spot-check for failures without scrolling through
+# the whole stream.
+.PHONY: logs-errors
+logs-errors: ## Tail only ERROR/WARNING lines from the backend log
+	@if [ ! -f logs/backend.log ]; then \
+	  echo "[logs-errors] no logs/backend.log yet — run \`make dev\` or \`make dev-debug\` first"; \
+	  exit 1; \
+	fi
+	@tail -n +1 -f logs/backend.log | grep --line-buffered -E '"level":"(error|warning)"|ERROR|WARNING'
 
 # Stop the background backend started by `make dev-backend`.
 .PHONY: stop-backend
