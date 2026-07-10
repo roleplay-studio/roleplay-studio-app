@@ -25,3 +25,6 @@ frontend/test-results/
 frontend/playwright-report/
 frontend/blob-report/
 frontend/playwright/.cache/
+frontend/e2e/snapshots/
+frontend/e2e-vite.log
+.vite.pid

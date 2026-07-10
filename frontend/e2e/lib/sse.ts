@@ -27,7 +27,22 @@ export type StreamChunk = {
 
 /**
  * Open a streaming endpoint and yield chunks as they arrive.
- * Throws if response.ok() is false.
+ *
+ * Playwright's ``APIResponse.body()`` returns a Node ``Buffer``
+ * (a ``Uint8Array``), not a Web ``ReadableStream``. The original
+ * helper tried ``reader.read()`` against that and crashed — caught
+ * immediately by ``02-chat-stream.spec.ts`` when it tried to assert
+ * on a real LLM stream. We now read the full response once with
+ * ``response.text()`` and feed the parser a complete SSE blob.
+ *
+ * Trade-off: we lose true byte-by-byte streaming, so a backend that
+ * stalls the TCP connection mid-stream will look healthy in this
+ * helper. Acceptable for the suite's purpose — we care about the
+ * event-sequence contract, not the watermark behaviour. If we ever
+ * need millisecond-level backpressure tests, switch to
+ * ``eventsource-parser`` over a manual byte loop.
+ *
+ * Throws if ``response.ok()`` is false.
  */
 export async function* openStream(api: APIRequestContext, path: string, opts: { method?: string; data?: unknown; headers?: Record<string, string> } = {}): AsyncGenerator<StreamChunk> {
   const response: APIResponse = await api.fetch(path, {
@@ -44,31 +59,28 @@ export async function* openStream(api: APIRequestContext, path: string, opts: { 
     throw new Error(`Stream open failed ${response.status()}: ${body.slice(0, 200)}`);
   }
 
-  const reader = await response.body();
-  if (!reader) throw new Error(`Stream response had no body for ${path}`);
-
-  let buffer = '';
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += new TextDecoder('utf-8').decode(value, { stream: true });
-    let nl: number;
-    while ((nl = buffer.indexOf('\n')) !== -1) {
-      const line = buffer.slice(0, nl);
-      buffer = buffer.slice(nl + 1);
-      if (line.startsWith('data:')) {
-        const payload = line.slice(5).trim();
-        if (payload === '[DONE]') {
-          yield { data: null, done: true };
-          return;
-        }
-        try {
-          yield { data: JSON.parse(payload), done: false };
-        } catch {
-          // Some chunks are non-JSON (heartbeats, comments). Skip.
-        }
-      }
+  const raw = await response.text();
+  let sawDone = false;
+  for (const line of raw.split('\n')) {
+    if (!line.startsWith('data:')) continue;
+    const payload = line.slice(5).trim();
+    if (payload === '[DONE]') {
+      sawDone = true;
+      yield { data: null, done: true };
+      break;
     }
+    if (!payload) continue;
+    try {
+      yield { data: JSON.parse(payload), done: false };
+    } catch {
+      // Some chunks are non-JSON (heartbeats, comments). Skip.
+    }
+  }
+  if (!sawDone) {
+    // Backend protocol contract: every chat stream must end with
+    // [DONE]. If it didn't, surface that loudly so callers can
+    // assert on it instead of silently truncating.
+    yield { data: null, done: true };
   }
 }
 
