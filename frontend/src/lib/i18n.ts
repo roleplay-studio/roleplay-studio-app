@@ -375,6 +375,9 @@ const dict: LangDict = Object.freeze({
     'settings.context_compression_threshold_hint':
       'Beginnt mit der Komprimierung, sobald die Unterhaltung diese Anzahl an Nachrichten überschreitet',
     'settings.context_compression_threshold_label': 'Komprimierungsschwelle',
+    'settings.history_limit_hint':
+      'Maximale Anzahl der aus der Datenbank geladenen Nachrichten für den LLM-Kontext. Erhöhe diesen Wert, wenn sehr lange Unterhaltungen im LLM-Debug-Panel abgeschnitten wirken. Änderungen gelten nur für neue Chat-Anfragen.',
+    'settings.history_limit_label': 'LLM-Kontextfenster',
     'settings.current': 'Aktuelle Konfiguration',
     'settings.db': 'DB',
     'settings.embedding': 'Embedding-Modell',
@@ -944,6 +947,9 @@ const dict: LangDict = Object.freeze({
     'settings.context_compression_threshold_hint':
       'Start compressing when conversation exceeds this many messages',
     'settings.context_compression_threshold_label': 'Compression Threshold',
+    'settings.history_limit_hint':
+      'Maximum number of messages loaded from the database for the LLM context. Raise this if very long threads appear truncated in the LLM debug panel. Changes apply to new chat requests only.',
+    'settings.history_limit_label': 'LLM Context Window',
     'settings.current': 'Current Configuration',
     'settings.db': 'DB',
     'settings.embedding': 'Embedding Model',
@@ -1467,6 +1473,9 @@ const dict: LangDict = Object.freeze({
     'settings.context_compression_threshold_hint':
       'Commencer la compression lorsque la conversation dépasse ce nombre de messages',
     'settings.context_compression_threshold_label': 'Seuil de compression',
+    'settings.history_limit_hint':
+      "Nombre maximum de messages chargés depuis la base de données pour le contexte du LLM. Augmentez cette valeur si les conversations très longues semblent tronquées dans le panneau de débogage LLM. Les modifications s'appliquent uniquement aux nouvelles demandes de chat.",
+    'settings.history_limit_label': 'Fenêtre de contexte LLM',
     'settings.current': 'Configuration actuelle',
     'settings.db': 'BD',
     'settings.embedding': "Modèle d\\'embedding",
@@ -2012,6 +2021,9 @@ const dict: LangDict = Object.freeze({
     'settings.context_compression_threshold_hint':
       '会話がこのメッセージ数を超えると圧縮を開始します',
     'settings.context_compression_threshold_label': '圧縮のしきい値',
+    'settings.history_limit_hint':
+      'LLMのコンテキスト用にデータベースから読み込まれるメッセージの最大数。LLMデバッグパネルで非常に長い会話が切り詰められているように見える場合は、この値を増やしてください。変更は新しいチャット要求にのみ適用されます。',
+    'settings.history_limit_label': 'LLMコンテキストウィンドウ',
     'settings.current': '現在の設定',
     'settings.db': 'DB',
     'settings.embedding': '埋め込みモデル',
@@ -2545,6 +2557,9 @@ const dict: LangDict = Object.freeze({
     'settings.context_compression_threshold_hint':
       '대화 메시지 수가 이 값을 초과하면 압축을 시작합니다',
     'settings.context_compression_threshold_label': '압축 임계값',
+    'settings.history_limit_hint':
+      'LLM 컨텍스트를 위해 데이터베이스에서 로드되는 최대 메시지 수입니다. 매우 긴 대화가 LLM 디버그 패널에서 잘린 것처럼 보이면 이 값을 늘리세요. 변경 사항은 새 채팅 요청에만 적용됩니다.',
+    'settings.history_limit_label': 'LLM 컨텍스트 창',
     'settings.current': '현재 설정',
     'settings.db': 'DB',
     'settings.embedding': '임베딩 모델',
@@ -3109,6 +3124,9 @@ const dict: LangDict = Object.freeze({
     'settings.context_compression_threshold_hint':
       'Начинать сжатие, когда диалог превышает это количество сообщений',
     'settings.context_compression_threshold_label': 'Порог сжатия',
+    'settings.history_limit_hint':
+      'Максимальное число сообщений, загружаемых из БД для контекста LLM. Увеличьте если длинные диалоги выглядят обрезанными в debug-панели LLM. Изменения применяются только к новым запросам чата.',
+    'settings.history_limit_label': 'Окно контекста LLM',
     'settings.current': 'Текущая конфигурация',
     'settings.db': 'БД',
     'settings.embedding': 'Модель эмбеддингов',
@@ -3618,6 +3636,9 @@ const dict: LangDict = Object.freeze({
     'settings.context_compression_keep_recent_label': '保留近期消息',
     'settings.context_compression_threshold_hint': '当对话消息数超过此值时开始压缩',
     'settings.context_compression_threshold_label': '压缩阈值',
+    'settings.history_limit_hint':
+      '从数据库加载到 LLM 上下文的最大消息数。如果很长的对话在 LLM 调试面板中显示被截断，请提高此值。修改仅对新聊天请求生效。',
+    'settings.history_limit_label': 'LLM 上下文窗口',
     'settings.current': '当前配置',
     'settings.db': '数据库',
     'settings.embedding': '嵌入模型',

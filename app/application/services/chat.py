@@ -175,7 +175,7 @@ class ChatService:
     async def _load_full_history(self, thread_id: int) -> list[MessageDTO]:
         """Load the full conversation history for ``thread_id``.
 
-        Defaults the page size to ``Settings.history_limit`` (200) so
+        Defaults the page size to ``Settings.history_limit`` (1000) so
         the ``MessageRepository.list_for_thread`` default of ``limit=20``
         — designed for the chat UI's first page — never silently
         truncates the LLM context. DEBUG1 had 91 active messages but
@@ -185,8 +185,26 @@ class ChatService:
         The compression stage (see ``_compress_history``) still kicks
         in above ``Settings.context_compression_threshold`` to keep
         the LLM prompt within sane token bounds.
+
+        When the loaded page is exactly as long as the cap, the DB may
+        still hold older rows that we silently dropped — log a warning
+        so a thread that outgrew ``history_limit`` is observable in
+        operator logs and the user knows to raise the cap in Settings.
+        The previous behaviour (200 default) produced "203 TURNS" in
+        the LLM debug panel on a 373-message thread with no signal
+        that 170 messages had been dropped on the floor.
         """
-        return await self._messages.list_for_thread(thread_id, limit=self._settings.history_limit)
+        limit = self._settings.history_limit
+        messages = await self._messages.list_for_thread(thread_id, limit=limit)
+        if len(messages) >= limit:
+            logger.warning(
+                "Thread %d returned %d messages — at the history_limit cap (%d). "
+                "Older messages were not loaded; raise HISTORY_LIMIT in Settings to see them.",
+                thread_id,
+                len(messages),
+                limit,
+            )
+        return messages
 
     async def send_message(self, command: SendMessageCommand) -> ChatResponse:
         request = await self._build_request(command)

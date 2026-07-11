@@ -110,6 +110,13 @@ class Settings(BaseSettings):
     # ``settings.llm_api_key.get_secret_value()``.
     llm_api_key: SecretStr | None = None
     llm_base_url: str = "https://openrouter.ai/api/v1"
+    # M16: ``llm_provider`` selects which LLM implementation
+    # ``app.bootstrap.build_container`` wires into the application.
+    # ``"openrouter"`` (default) drives the real ``OpenRouterLLM`` over
+    # HTTPS, ``"mock"`` swaps in ``MockLLM`` — a deterministic, zero-cost
+    # in-process simulator used by E2E suites and CI. Any future
+    # provider (Ollama, vLLM, Anthropic) would add a value here.
+    llm_provider: Literal["mock", "openrouter"] = "openrouter"
     chat_model: str = "openai/gpt-oss-20b"
     fast_model: str = "openai/gpt-4o-mini"
     embedding_model: str = "qwen/qwen3-embedding-8b"
@@ -145,7 +152,14 @@ class Settings(BaseSettings):
 
     # ── RAG / Memory ───────────────────────────────────────────────
     knowledge_relevance_threshold: float = Field(0.3, ge=0.0, le=1.0)
-    history_limit: int = Field(200, ge=10)
+    # Maximum messages loaded from the DB for the LLM context.
+    # Raised from 200 to 1000 so DEBUG1-class threads (>200 messages)
+    # don't silently drop history before context compression even
+    # gets a chance to run. ``_load_full_history`` logs a warning
+    # when the DB actually holds more rows than this cap, so users
+    # that hit the limit again can raise it from Settings instead
+    # of wondering "where did my old messages go".
+    history_limit: int = Field(1000, ge=10)
 
     # ── Summarization ─────────────────────────────────────────────
     summarize_enabled: bool = True

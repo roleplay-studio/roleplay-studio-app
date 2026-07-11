@@ -23,6 +23,11 @@ class UpdateConfigRequest(BaseModel):
     context_compression_enabled: bool | None = None
     context_compression_threshold: int | None = None
     context_compression_keep_recent: int | None = None
+    # Cap on messages loaded from the DB for the LLM context.
+    # ``None`` leaves the existing value alone so the Settings page
+    # can omit it from its PATCH (saves don't overwrite fields the
+    # user didn't change). ``Field(ge=10)`` mirrors Settings.
+    history_limit: int | None = Field(default=None, ge=10)
 
 
 class UpdateBotRequest(BaseModel):

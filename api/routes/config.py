@@ -110,6 +110,7 @@ async def update_config(body: UpdateConfigRequest):
         "CONTEXT_COMPRESSION_KEEP_RECENT": str(body.context_compression_keep_recent)
         if body.context_compression_keep_recent is not None
         else None,
+        "HISTORY_LIMIT": str(body.history_limit) if body.history_limit is not None else None,
     }
 
     for env_key, value in env_updates.items():
