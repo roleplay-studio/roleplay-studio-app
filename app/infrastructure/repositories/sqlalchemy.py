@@ -554,6 +554,15 @@ class SqlAlchemyMessageRepository:
         generation_status: str = "complete",
         reasoning: str | None = None,
         dynamic_system_prompt: str | None = None,
+        # ``None`` (default) leaves ``state`` as NULL on insert —
+        # preserves historical behaviour where state was unset on
+        # user messages and pre-state-update assistant rows. ``""``
+        # explicitly stores an empty string. The combination is what
+        # lets ``ThreadService.update_message`` faithfully copy the
+        # original message's state into a new branch without losing
+        # the difference between "no snapshot yet" (NULL) and
+        # "snapshot was empty" (empty string).
+        state: str | None = None,
     ) -> int | None:
         if not content:
             return None
@@ -572,6 +581,12 @@ class SqlAlchemyMessageRepository:
                 branch_index=branch_index,
                 is_active=is_active,
                 generation_status=generation_status,
+                # SQLAlchemy treats ``None`` as "leave the column at
+                # its default (NULL)"; empty strings are persisted
+                # as empty strings. The aggregate list_for_thread
+                # projection reads them identically so the DTO
+                # contract holds either way.
+                state=state,
             )
             if timestamp is not None:
                 msg.timestamp = timestamp
@@ -590,6 +605,7 @@ class SqlAlchemyMessageRepository:
         timestamp: datetime | None = None,
         generation_status: str = "complete",
         reasoning: str | None = None,
+        state: str | None = None,
     ) -> int | None:
         return await self.save(
             thread_id,
@@ -601,6 +617,7 @@ class SqlAlchemyMessageRepository:
             timestamp=timestamp,
             generation_status=generation_status,
             reasoning=reasoning,
+            state=state,
         )
 
     async def save_exchange(

@@ -139,7 +139,9 @@ async def update_message(
     container: ContainerDep,
 ):
     try:
-        new_id = await container.threads.update_message(thread_id, message_id, body.content)
+        new_id = await container.threads.update_message(
+            thread_id, message_id, body.content, state=body.state
+        )
         return {"ok": True, "message_id": new_id}
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))

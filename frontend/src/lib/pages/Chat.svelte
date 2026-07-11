@@ -144,6 +144,15 @@
   let showEditModal = $state(false);
   let editMessageId: null | number = $state(null);
   let editContent = $state('');
+  // World-state snapshot for the assistant message being edited.
+  // ``null`` means "the message has no state column populated yet,
+  // hide the second textarea" — only assistant turns ever carry a
+  // state. The local ``editMessageState`` mirror handles the typed
+  // value; on save we send a string (including ``""`` for "clear
+  // the snapshot") so the server can distinguish clearing from
+  // "use the original message's state" via the explicit-null vs
+  // omitted-state route contract.
+  let editMessageState: null | string = $state(null);
 
   // Delete confirm
   let showDeleteConfirm = $state(false);
@@ -1194,6 +1203,11 @@
   function openEditModal(msg: Message) {
     editMessageId = msg.id;
     editContent = msg.content;
+    // ``Message.state`` is the new world-state snapshot column
+    // (assistant only). We only show the state textarea for
+    // assistant turns; for user messages the value stays null
+    // and the modal hides the second textarea via ``{#if}``.
+    editMessageState = msg.role === 'assistant' ? (msg.state ?? null) : null;
     showEditModal = true;
   }
 
@@ -1201,13 +1215,31 @@
     showEditModal = false;
     editMessageId = null;
     editContent = '';
+    editMessageState = null;
   }
 
-  async function saveEditModal(text: string) {
+  /**
+   * Save the edit modal's content + state via the EditMessageModal.
+   *
+   * Three-way contract for ``newState`` (the second positional arg):
+   *   - ``null`` + the message had no state column → don't send the
+   *     ``state`` key at all (server-side copies original state).
+   *   - non-null string → send verbatim; empty string clears the
+   *     snapshot explicitly.
+   *   - ``null`` + the message had a state → send no key, server
+   *     preserves the original on the new branch (branching fidelity).
+   *
+   * In short: the modal only forwards a state string when we trust
+   * the typed value (i.e. always for assistant messages with a
+   * state column). For user-message edits the parent passes ``null``
+   * and the modal's ``{#if messageState !== null}`` branch is hidden
+   * anyway.
+   */
+  async function saveEditModal(text: string, newState: string | null) {
     if (selectedThreadId === null || editMessageId === null) return;
     if (!text.trim()) return;
     try {
-      await api.updateMessage(selectedThreadId, editMessageId, text);
+      await api.updateMessage(selectedThreadId, editMessageId, text, newState);
       closeEditModal();
       messages = await api.listMessages(selectedThreadId);
       void refreshThreadStats(selectedThreadId);
@@ -1452,6 +1484,7 @@
   <EditMessageModal
     show={showEditModal}
     content={editContent}
+    messageState={editMessageState}
     onsave={saveEditModal}
     onclose={closeEditModal}
   />

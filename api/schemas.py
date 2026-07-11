@@ -57,7 +57,18 @@ class KnowledgeRequest(BaseModel):
 
 
 class EditMessageRequest(BaseModel):
+    # New content for the branched assistant/user message. Remains
+    # ``min_length=1`` for backward compat with the existing
+    # message-edit UI — a future "edit state only" flow can relax
+    # this when the EditMessageModal ships a dedicated state field.
     content: str = Field(min_length=1)
+    # Optional world-state snapshot for the new branch. ``None`` (not
+    # present in the request body) keeps the original message's state
+    # on the new branch — preserves branching fidelity. ``""`` clears
+    # the snapshot explicitly. ``<not-empty string>`` overwrites it.
+    # The EditMessageModal on the assistant-message surface sends this
+    # only when the state textarea is dirty.
+    state: str | None = None
 
 
 class ConfigureRequest(BaseModel):

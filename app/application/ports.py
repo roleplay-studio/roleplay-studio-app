@@ -168,6 +168,12 @@ class MessageRepository(Protocol):
         # the floating-prompt panel. ``None`` = no floating prompt was
         # sent (default for bots that don't use the feature).
         dynamic_system_prompt: str | None = None,
+        # Per-message world-state snapshot for assistant turns. ``None``
+        # means "don't set" (column stays NULL); pass ``""`` to
+        # explicitly clear an existing state. Stamped by
+        # ``regenerate_state`` after each assistant turn; can also be
+        # edited by the user via the EditMessageModal.
+        state: str | None = None,
     ) -> int | None: ...
 
     async def save_exchange(
@@ -248,6 +254,14 @@ class MessageRepository(Protocol):
         timestamp: datetime | None = None,
         generation_status: str = "complete",
         reasoning: str | None = None,
+        # World-state snapshot to copy into the new branch. ``None``
+        # means "leave NULL on the new row" (matches the historical
+        # behaviour where state was an opaque system attribute);
+        # ``""`` explicitly clears it. The service layer is expected
+        # to forward the *original* message's state here so branched
+        # edits don't silently drop the world-state context the user
+        # was looking at when they decided to edit.
+        state: str | None = None,
     ) -> int | None:
         """Save a message with explicit branch group."""
         ...

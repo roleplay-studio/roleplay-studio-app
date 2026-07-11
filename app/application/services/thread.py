@@ -164,13 +164,26 @@ class ThreadService:
     async def save_assistant_message(self, thread_id: int, content: str) -> None:
         await self._messages.save(thread_id, "assistant", content)
 
-    async def update_message(self, thread_id: int, message_id: int, content: str) -> int | None:
+    async def update_message(
+        self,
+        thread_id: int,
+        message_id: int,
+        content: str,
+        state: str | None = None,
+    ) -> int | None:
         """Edit a message, creating a new branch version.
 
         If the message has no branch group yet, the original is marked
         as branch version 0 (inactive) and the edited content becomes
         version 1 (active). The new version preserves the original
         message's timestamp so it stays in the same position in history.
+
+        ``state`` controls the world-state snapshot on the new branch:
+        ``None`` (default) copies the original's state — preserves
+        branching fidelity so a user who edits an assistant message
+        without touching the world state still sees the state they
+        had in mind when they decided to edit. ``""`` explicitly
+        clears the snapshot.
 
         Returns the new message id.
         """
@@ -180,10 +193,12 @@ class ThreadService:
         # Get the original message's branch info
         versions = await self._messages.get_versions(message_id)
         next_index = 0
+        original_state: str | None = None
         if versions:
-            target = versions[0]  # original for role + timestamp
+            target = versions[0]  # original for role + timestamp + state
             branch_group = target.branch_group
             next_index = max(v.branch_index for v in versions) + 1
+            original_state = target.state
             # Deactivate the previous active version before creating the new one
             old_active = next((v for v in versions if v.id == message_id), None)
             if old_active is not None and branch_group is not None:
@@ -196,6 +211,7 @@ class ThreadService:
             if target is None:
                 raise NotFoundError(f"Message {message_id} was not found in thread {thread_id}")
             branch_group = None
+            original_state = target.state
 
         role = target.role
         original_timestamp = target.created_at
@@ -206,6 +222,13 @@ class ThreadService:
             await self._messages.update_branch(message_id, branch_group, 0, is_active=False)
             next_index = 1
 
+        # ``None`` means "use the original message's state"; a string
+        # (including ``""``) is the explicit new value. Without this
+        # three-way contract, branching on a state-bearing assistant
+        # message would silently drop the world-state context the
+        # user was relying on when they decided to edit.
+        effective_state = state if state is not None else original_state
+
         # Save the edited version as the new active branch
         new_id = await self._messages.save_branch(
             thread_id,
@@ -214,6 +237,7 @@ class ThreadService:
             branch_group,
             next_index,
             timestamp=original_timestamp,
+            state=effective_state,
         )
         return new_id
 

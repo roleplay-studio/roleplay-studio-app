@@ -718,10 +718,20 @@ export const api = {
       method: 'PUT',
     }),
 
-  // Message editing
-  updateMessage: (threadId: number, messageId: number, content: string) =>
+  // Message editing. ``state`` is the world-state snapshot column
+  // on the assistant message table — pass ``undefined`` to keep the
+  // original message's state on the new branch (branching fidelity),
+  // pass ``""`` to explicitly clear it, pass a string to overwrite.
+  // The EditMessageModal's "Save" sends the currently-typed value
+  // (including empty), so the network shape is always present.
+  updateMessage: (
+    threadId: number,
+    messageId: number,
+    content: string,
+    state?: null | string,
+  ) =>
     request<{ ok: boolean }>(`/api/threads/${threadId}/messages/${messageId}`, {
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, state: state ?? null }),
       method: 'PUT',
     }),
 
