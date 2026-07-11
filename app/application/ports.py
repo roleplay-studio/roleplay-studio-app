@@ -185,6 +185,18 @@ class MessageRepository(Protocol):
         before_id: int | None = None,
     ) -> list[MessageDTO]: ...
 
+    async def count_active(self, thread_id: int) -> int:
+        """Count the active chain of messages in ``thread_id``.
+
+        Mirrors the ``list_for_thread`` filter: rows with no
+        ``branch_group`` plus the active row of any branch group.
+        Used by ``ThreadService.get_stats`` so the chat header reports
+        total messages rather than the latest paginated window.
+
+        Returns 0 for unknown / empty threads (not an error).
+        """
+        ...
+
     async def clear_thread(self, thread_id: int) -> None: ...
 
     async def update(self, message_id: int, content: str) -> None: ...

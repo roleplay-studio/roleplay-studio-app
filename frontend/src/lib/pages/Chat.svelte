@@ -12,6 +12,7 @@
     type RecentThread,
     type Thread,
     type ThreadFileDTO,
+    type ThreadStats,
   } from '../api';
   import ChatHeader from '../ChatHeader.svelte';
   import ChatInput from '../ChatInput.svelte';
@@ -156,10 +157,21 @@
   let hasSummary = $state(false);
 
   // Stats
+  // ``messageCount`` / ``totalTokens`` are kept for the *rendered*
+  // page (e.g. the scroll-virtualizer, the token-aware LLM debug
+  // modal), but the chat header binds to ``realMessageCount`` /
+  // ``realTokenEstimate`` — the values from the dedicated
+  // ``GET /api/threads/{id}/stats`` endpoint that reflect the FULL
+  // thread, not just the latest 50-message page. Deriving header
+  // counts from ``messages.length`` was the 0.0.4 bug: visually
+  // capped at 50 even on threads with hundreds of exchanges.
   const messageCount = $derived(messages.filter((m) => m.role !== 'system').length);
   const totalTokens = $derived(
     messages.reduce((sum, m) => sum + (m.content ? Math.ceil(m.content.length / 4) : 0), 0),
   );
+  let threadStats: null | ThreadStats = $state<null | ThreadStats>(null);
+  const realMessageCount = $derived(threadStats?.message_count ?? messageCount);
+  const realTokenEstimate = $derived(threadStats?.token_estimate ?? totalTokens);
 
   // File attachments
   let messageFiles: Record<number, ThreadFileDTO[]> = $state({});
@@ -223,6 +235,12 @@
       selectedThreadId = null;
       editMessageId = null;
       editContent = '';
+      // Reset the dedicated stats binding too — the page-local
+      // ``messages.length`` fallback won't surface the real total
+      // until the next ``refreshThreadStats`` resolves, but at least
+      // the header won't show a stale number from the previous
+      // bot's thread.
+      threadStats = null;
       loading = true;
       loadBot(selectedBotId);
     } else {
@@ -230,6 +248,7 @@
       threads = [];
       messages = [];
       selectedThreadId = null;
+      threadStats = null;
       loading = true;
       api
         .listRecentThreads()
@@ -309,6 +328,11 @@
     hasMoreOlder = messages.length >= MESSAGE_PAGE_SIZE;
     // Load files for all messages in one request
     await loadThreadFiles(threadId);
+    // Load real header stats. Run in parallel with file/version setup
+    // so the page transition feels snappy — if the call fails (e.g.
+    // user race-cleared the thread) we silently keep the page-local
+    // fallback values derived from ``messages.length``.
+    void refreshThreadStats(threadId);
     // Sync versions state from the embedded msg.versions field that
     // the backend already populates in listMessages.
     const synced = syncVersionsStateFromMessages(messages);
@@ -330,6 +354,24 @@
     // chunk — the user always expects to land on the latest message,
     // not wherever the previous scroll position happened to be.
     scrollToBottom(true);
+  }
+
+  /** Fetch the full-thread header stats (independent of pagination).
+   *
+   * Called when entering a thread, and again whenever the page-local
+   * ``messages.length`` flips relative to the last known stats — that
+   * catches the case where the user just sent a new turn (count
+   * should bump) without paying for a network call on every render.
+   */
+  async function refreshThreadStats(threadId: number): Promise<void> {
+    try {
+      threadStats = await api.getThreadStats(threadId);
+    } catch (e) {
+      // 404 (thread gone) or network blip: leave the page-local
+      // ``messages.length``-derived fallback in place. The header
+      // will at worst show a slightly-stale count rather than 0.
+      console.debug('getThreadStats failed; using local fallback', e);
+    }
   }
 
   async function loadThreadFiles(threadId: number) {
@@ -693,10 +735,15 @@
       scrollToBottom();
       // Only refresh from server if no error occurred — keeps error message visible
       if (!streamError && selectedThreadId) {
+        const tid = selectedThreadId;
         api
-          .listMessages(selectedThreadId)
+          .listMessages(tid)
           .then((msgs) => {
             messages = msgs;
+            // Keep the chat-header stats in lockstep with the freshly-
+            // persisted message counts (assistant + reasoning rows,
+            // file-attachment rows, etc. all increase the chain).
+            void refreshThreadStats(tid);
             // Re-attach the dev-mode debug/usage payload to the
             // assistant message's real DB id. The stream yielded
             // these events before the message was persisted, so we
@@ -1088,10 +1135,12 @@
         // bubble above and a server refresh would clobber it (the "blink and
         // disappear" bug: ⚠️ appears, then listMessages wipes it).
         if (!retryFailed && selectedThreadId) {
+          const tid = selectedThreadId;
           api
-            .listMessages(selectedThreadId)
+            .listMessages(tid)
             .then((msgs) => {
               messages = msgs;
+              void refreshThreadStats(tid);
               scrollToBottom();
             })
             .catch(() => {});
@@ -1161,6 +1210,7 @@
       await api.updateMessage(selectedThreadId, editMessageId, text);
       closeEditModal();
       messages = await api.listMessages(selectedThreadId);
+      void refreshThreadStats(selectedThreadId);
       // Sync versions state — without this the ◀ N/M ▶ counter stays
       // on "1/1" until something else (regen / switch version) re-syncs.
       const synced = syncVersionsStateFromMessages(messages);
@@ -1186,6 +1236,7 @@
       showDeleteConfirm = false;
       deletingMsgId = null;
       messages = await api.listMessages(selectedThreadId);
+      void refreshThreadStats(selectedThreadId);
       // Sync versions state — the deleted message may have had a
       // branch group; refetched messages reflect the new state.
       const synced = syncVersionsStateFromMessages(messages);
@@ -1238,8 +1289,8 @@
       <ChatHeader
         botName={bot.name}
         botAvatarPath={bot.avatar_path}
-        {messageCount}
-        {totalTokens}
+        messageCount={realMessageCount}
+        totalTokens={realTokenEstimate}
         {hasSummary}
         {compressing}
         {lang}

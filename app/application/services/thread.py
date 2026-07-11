@@ -10,6 +10,7 @@ from app.application.dto import (
     MessageDTO,
     RecentThreadDTO,
     ThreadDTO,
+    ThreadStatsDTO,
 )
 from app.application.exceptions import NotFoundError
 from app.application.ports import BotRepository, MessageRepository, ThreadRepository
@@ -130,6 +131,35 @@ class ThreadService:
         to messages that have them.
         """
         return await self._messages.list_for_thread(thread_id, limit, before_id=before_id)
+
+    async def get_stats(self, thread_id: int) -> ThreadStatsDTO:
+        """Return header-level stats for the thread.
+
+        Complements the paginated ``list_messages`` so the chat header
+        can show the **real** message total (not just the latest
+        50-message window). The token estimate mirrors the frontend's
+        ``chars / 4`` ceiling — it is intentionally cheap and matches
+        the visible counter.
+
+        Raises ``NotFoundError`` only if the thread itself does not
+        exist; an empty thread returns zero-count stats instead of an
+        error.
+        """
+        # Confirm the thread exists so we don't accidentally return
+        # stats for a stale / deleted thread id (e.g. after the user
+        # clears their chat). Empty thread -> 0 messages -> header
+        # shows "0 msgs".
+        thread = await self._threads.get(thread_id)
+        if thread is None:
+            raise NotFoundError(f"Thread {thread_id} not found")
+
+        active = await self._messages.list_for_thread(thread_id, limit=10_000)
+        chars = sum(len(m.content) for m in active)
+        return ThreadStatsDTO(
+            thread_id=thread_id,
+            message_count=len(active),
+            token_estimate=chars // 4,
+        )
 
     async def save_assistant_message(self, thread_id: int, content: str) -> None:
         await self._messages.save(thread_id, "assistant", content)

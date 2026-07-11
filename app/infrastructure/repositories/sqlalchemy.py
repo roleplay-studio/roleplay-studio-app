@@ -742,6 +742,28 @@ class SqlAlchemyMessageRepository:
             )
             await session.commit()
 
+    async def count_active(self, thread_id: int) -> int:
+        """Count the active chain of messages in ``thread_id``.
+
+        Mirrors ``list_for_thread``'s branch-group filter: rows with
+        no branch_group plus the active row of any branch group.
+        Used by ``ThreadService.get_stats`` so the chat header reports
+        total messages rather than the latest paginated window.
+
+        Returns 0 for unknown / empty threads (no error — distinguishes
+        "missing" from "empty" via the route layer).
+        """
+        async with self._store._async_session_factory() as session:
+            result = await session.execute(
+                select(func.count(Conversation.id)).where(
+                    Conversation.thread_id == thread_id,
+                    (Conversation.branch_group.is_(None))
+                    | (Conversation.is_active.is_(True)),
+                    Conversation.content.isnot(None) & (Conversation.content != ""),
+                )
+            )
+            return int(result.scalar() or 0)
+
     async def update(self, message_id: int, content: str) -> None:
         if not content:
             return

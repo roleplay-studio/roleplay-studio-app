@@ -204,6 +204,25 @@ class ThreadDTO(BaseModel):
     created_at: datetime | None = None
 
 
+class ThreadStatsDTO(BaseModel):
+    """Lightweight snapshot of a thread's size for header stats.
+
+    Returned by ``GET /api/threads/{thread_id}/stats``. Independent of
+    pagination — counts the entire active chain (with the same
+    ``branch_group IS NULL OR is_active`` filter used by
+    ``list_for_thread``) so the chat header shows real numbers rather
+    than just the latest page (50 by default).
+
+    ``token_estimate`` is a best-effort ceiling (chars/4 rounded up),
+    matching the rough proxy the frontend already uses. Callers should
+    treat it as an indicator, not a billing-grade count.
+    """
+
+    thread_id: int
+    message_count: int
+    token_estimate: int
+
+
 class RecentThreadDTO(BaseModel):
     """A thread with bot info, persona name, and last message preview."""
 

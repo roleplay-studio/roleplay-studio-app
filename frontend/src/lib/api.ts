@@ -242,13 +242,16 @@ export interface RecentThread {
   thread_id: number;
 }
 
-// ── Dev-mode LLM debug payload ───────────────────────────────────────
-//
-// These types mirror the `LLMDebugInfo` Pydantic DTO and the
-// `type: "usage"` SSE event sent by the backend. The dev-mode chat
-// modal reads them to display the real LLM request payload and the
-// per-request token counts. In production the SSE events are never
-// emitted, so the frontend never sees these shapes.
+/** Header-level stats from `GET /api/threads/{id}/stats`.
+ *
+ * Distinct from `listMessages` — `message_count` is the real full-thread
+ * total (including older pages), independent of the 50-message pagination
+ * window the chat UI fetches. The chat header binds to this, never to the
+ * length of the locally-loaded messages array.
+ */
+// (Defined further down so the file remains alpha-sorted by interface
+// name for ESLint perfectionist's sort-modules rule. The interface
+// itself is the same; see chat header binding for usage.)
 
 export interface ReindexJobState {
   bots_done: number;
@@ -291,6 +294,22 @@ export interface ThreadFileDTO {
   message_id: null | number;
   storage_path: string;
   thread_id: number;
+}
+
+/** Header-level stats from `GET /api/threads/{id}/stats`.
+ *
+ * Distinct from `listMessages` — `message_count` is the real full-thread
+ * total (including older pages), independent of the 50-message pagination
+ * window the chat UI fetches. The chat header binds to this, never to the
+ * length of the locally-loaded messages array.
+ *
+ * Note: declared after ``ThreadFileDTO`` so ESLint perfectionist's
+ * sort-modules rule sees the alpha order (``Th...Fi...`` then ``Th...St...``).
+ */
+export interface ThreadStats {
+  message_count: number;
+  thread_id: number;
+  token_estimate: number;
 }
 
 export class ApiError extends Error {
@@ -491,6 +510,10 @@ export const api = {
   getPersona: (id: number) => request<Persona>(`/api/personas/${id}`),
   // Threads
   getThread: (id: number) => request<Thread>(`/api/threads/${id}`),
+  // Header-level thread stats used by the chat header — full count,
+  // independent of listMessages pagination. See Chat.svelte binding.
+  getThreadStats: (threadId: number) =>
+    request<ThreadStats>(`/api/threads/${threadId}/stats`),
   // Health
   health: () => request<{ status: string }>('/api/health'),
   importBot: async (file: File): Promise<{ id: number }> => {
@@ -676,6 +699,7 @@ export const api = {
     embedding_base_url?: null | string;
     embedding_model?: string;
     fast_model?: string;
+    history_limit?: number;
     knowledge_relevance_threshold?: number;
     language?: string;
     max_tokens?: number;
