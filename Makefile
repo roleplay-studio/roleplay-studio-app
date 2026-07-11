@@ -245,8 +245,8 @@ test-frontend: ## Run frontend vitest suite
 
 .PHONY: e2e-backend
 e2e-backend: ## Start the FastAPI backend that the e2e suite talks to
-	$(MAKE) dev-backend
-	@echo "[e2e] waiting for backend on :55245 ..."
+	$(MAKE) dev-backend LLM_PROVIDER=$${LLM_PROVIDER:-mock}
+	@echo "[e2e] waiting for backend on :55245 (LLM_PROVIDER=$${LLM_PROVIDER:-mock}) ..."
 	@for i in $$(seq 1 30); do \
 	  if curl -fsS http://127.0.0.1:55245/api/health >/dev/null 2>&1; then \
 	    echo "[e2e] backend ready"; exit 0; \
@@ -309,8 +309,16 @@ e2e-smoke: ## Run only @smoke tests (~30 s, smoke coverage of the 5 critical jou
 	exit $$E2E_EXIT
 
 .PHONY: e2e
-e2e: ## Run full Playwright E2E suite (real backend + Vite, real LLM cost)
+e2e: ## Run full Playwright E2E suite (mock LLM by default — set LLM_PROVIDER=openrouter for real)
 	$(MAKE) e2e-stack-up
+	cd frontend && $(NPM) run e2e
+	E2E_EXIT=$$?; \
+	$(MAKE) -s e2e-stack-down || true; \
+	exit $$E2E_EXIT
+
+.PHONY: e2e-real-llm
+e2e-real-llm: ## Like ``e2e`` but drives the real OpenRouter LLM (set LLM_API_KEY in env)
+	LLM_PROVIDER=openrouter $(MAKE) e2e-stack-up
 	cd frontend && $(NPM) run e2e
 	E2E_EXIT=$$?; \
 	$(MAKE) -s e2e-stack-down || true; \
