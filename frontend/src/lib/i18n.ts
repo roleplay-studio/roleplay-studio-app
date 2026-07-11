@@ -1370,7 +1370,7 @@ const dict: LangDict = Object.freeze({
     'edit_message.save': 'Enregistrer',
     'edit_message.title': '✏️ Modifier le message',
     'edit_message.state_hint':
-      'Capture du monde que l'assistant a écrit pour ce tour. Modifiez pour réécrire le monde avant que les tours en aval ne le voient.',
+      "Capture du monde que l'assistant a écrit pour ce tour. Modifiez pour réécrire le monde avant que les tours en aval ne le voient.",
     'edit_message.state_label': 'État du monde',
     'edit_message.state_placeholder': 'monde : météo, lieu, faits…',
     'feature.android.desc': 'Client mobile natif (en cours)',
