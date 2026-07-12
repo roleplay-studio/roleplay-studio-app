@@ -272,7 +272,14 @@ class Settings(BaseSettings):
     tts_provider: Literal["disabled", "mock", "minimax"] = "disabled"
     tts_api_key: SecretStr | None = None
     tts_base_url: str = "https://api.minimaxi.com/v1"
-    tts_voice_id: str = "english_female_1"
+    # MiniMax's published voice catalog uses ``<Language>_<Persona>``
+    # strings (e.g. ``Russian_ReliableMan``, ``English_Graceful_Lady``,
+    # ``German_SweetLady``). ``english_female_1`` is NOT a real id —
+    # the default value was set when the integration was written
+    # against an older catalog and silently returns HTTP 502 on first
+    # use. ``Russian_ReliableMan`` is a safe documented default; the
+    # Settings page exposes the full catalog so operators can pick.
+    tts_voice_id: str = "Russian_ReliableMan"
     tts_model: str = "speech-02-turbo"
     tts_speed: float = Field(1.0, ge=0.5, le=2.0)
     # Where synthesised audio is cached on disk. Bare filename resolves

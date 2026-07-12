@@ -67,7 +67,7 @@
   // ``tts_api_key_configured`` field of AppConfig.
   let editTtsProvider = $state<'disabled' | 'minimax' | 'mock'>('disabled');
   let editTtsBaseUrl = $state('https://api.minimaxi.com/v1');
-  let editTtsVoiceId = $state('english_female_1');
+  let editTtsVoiceId = $state('Russian_ReliableMan');
   let editTtsModel = $state('speech-02-turbo');
   let editTtsSpeed = $state(1.0);
   let editTtsCacheDir = $state('tts_cache');
@@ -1270,7 +1270,7 @@
 
               <div class="field-group">
                 <label class="field-label">Voice ID</label>
-                <Input bind:value={editTtsVoiceId} placeholder="english_female_1" />
+                <Input bind:value={editTtsVoiceId} placeholder="Russian_ReliableMan" />
               </div>
 
               <div class="field-group">

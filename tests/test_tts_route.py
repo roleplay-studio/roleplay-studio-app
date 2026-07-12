@@ -61,13 +61,20 @@ def tts_app(tmp_path: Path) -> Generator[TestClient]:
 
 @pytest.fixture
 def disabled_app(tmp_path: Path) -> Generator[TestClient]:
-    """TestClient backed by a container with ``TTS_PROVIDER=disabled``."""
+    """TestClient backed by a container with ``TTS_PROVIDER=disabled``.
+
+    Forces ``tts_provider="disabled"`` explicitly so the fixture works
+    regardless of what the user has in their local ``.env`` — under a
+    real MiniMax key the default container would not raise 503, and the
+    test would fail for the wrong reason.
+    """
     settings = Settings(
         _env_file=None,  # type: ignore[call-arg]
         db_path=str(tmp_path / "v.db"),
+        tts_provider="disabled",
     )
     container = build_container(settings=settings)
-    assert container.tts is None, "default config should leave TTS off"
+    assert container.tts is None, "fixture must yield a TTS-less container"
 
     app = create_app()
     app.dependency_overrides[_get_container] = lambda: container

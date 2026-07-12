@@ -102,14 +102,20 @@ class MiniMaxTTSProvider:
         self._client: httpx.AsyncClient | None = None
 
     async def startup(self) -> None:
-        """Open the httpx client. Idempotent — pair with ``close()``."""
+        """Open the httpx client. Idempotent — pair with ``close()``.
+
+        Earlier versions ``del self._api_key``-ed the SecretStr here
+        thinking the static-typer would complain about an unused
+        private attribute. That worked once (the attribute was read
+        synchronously on the very first ``synthesize`` call) but the
+        SecretStr was missing by the time the lifespan re-ran
+        ``startup`` / ``close`` round-trips, so any subsequent call
+        blew up with ``AttributeError: '_api_key'`` — exactly the
+        502 the user saw in production. We keep the attribute, and
+        ``_request_headers`` reads it on every request.
+        """
         if self._client is None:
             self._client = httpx.AsyncClient(timeout=_REQUEST_TIMEOUT_S)
-        # Touch the api_key so the field is "used" — keeps ruff and
-        # downstream static analysers from flagging the stored SecretStr
-        # as an unused private attribute (the value flows through
-        # ``_request_headers`` on every call; field is just a cache).
-        del self._api_key
 
     async def close(self) -> None:
         """Close the httpx client. Safe to call on an un-started instance."""
