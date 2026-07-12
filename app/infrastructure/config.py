@@ -174,6 +174,18 @@ class Settings(BaseSettings):
     summarize_batch_enabled: bool = True
     summarize_batch_size: int = Field(3, ge=1, le=20)
 
+    # ── State context ─────────────────────────────────────────────
+    # Number of recent user/assistant pairs the state-generation
+    # LLM sees alongside the previous state snapshot. The default
+    # (10 pairs) is chosen to match SUMMARIZE_RECENT_LIMIT so the
+    # 'recent' window has the same ceiling everywhere. Without
+    # this, ``regenerate_state`` only sees the previous state plus
+    # the current exchange — anything between the last successful
+    # state regen and now is lost, so the regenerator must guess.
+    # Set to 0 to restore the legacy minimal prompt (only current
+    # user + assistant + previous state).
+    state_context_pairs: int = Field(10, ge=0)
+
     # ── UI / Debug ─────────────────────────────────────────────────
     # m12: backward-compat shim. The original code stored these under
     # APP_LANGUAGE / APP_THEME in .env (see api/routes/config.py which

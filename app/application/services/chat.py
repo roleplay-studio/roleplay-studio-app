@@ -820,17 +820,33 @@ class ChatService:
             # while. The post-call check below detects the missing
             # closing triple-backtick fence and flags the truncation
             # with a trailing marker so the UI knows.
+            #
+            # ``state_context_pairs`` controls how much of the
+            # recent dialogue we feed alongside the previous
+            # state. With 0 we keep the pre-feature minimal
+            # prompt (just current user + assistant). With the
+            # default 10 the LLM sees the last 10 user/assistant
+            # exchanges before the current one — enough to track
+            # NPC state changes, faction politics, and ongoing
+            # quests across the whole conversation without the
+            # operator having to manually hit /state/regenerate.
+            recent_block = await self._build_recent_conversation_block(
+                thread_id=thread_id,
+                before_id=assistant_message_id,
+                pairs=self._settings.state_context_pairs,
+            )
+
+            user_message = (
+                f"Previous state:\n{previous_state or '(none)'}\n\n"
+                f"{recent_block}"
+                f"Current user message:\n{request.user_input}\n\n"
+                f"Current assistant response:\n{assistant_msg_text}"
+            )
+
             response = await state_llm.generate_response(
                 messages=[
                     {"role": "system", "content": bot.world_state_prompt},
-                    {
-                        "role": "user",
-                        "content": (
-                            f"Previous state:\n{previous_state or '(none)'}\n\n"
-                            f"User message:\n{request.user_input}\n\n"
-                            f"Assistant response:\n{assistant_msg_text}"
-                        ),
-                    },
+                    {"role": "user", "content": user_message},
                 ],
                 max_tokens=8192,
             )
@@ -927,6 +943,104 @@ class ChatService:
             if m.id == message_id:
                 return m.content or ""
         return ""
+
+    async def _build_recent_conversation_block(
+        self,
+        thread_id: int,
+        before_id: int,
+        pairs: int,
+    ) -> str:
+        """Build the ``Recent conversation:`` text block fed to the
+        state-generation LLM.
+
+        Parameters
+        ----------
+        thread_id
+            The thread the assistant message belongs to.
+        before_id
+            Exclusive upper bound on message ids — the current
+            assistant message being regenerated. We don't include
+            it in the recent block because it's already rendered in
+            the separate ``Current assistant response:`` section
+            of the prompt. Including it twice would be redundant
+            and confuse smaller models.
+        pairs
+            How many user/assistant exchanges to include. ``0``
+            means "skip the block entirely" — the legacy minimal
+            prompt. Negative values are rejected by ``Settings``
+            (``Field(ge=0)``) so we don't need to defend here.
+
+        Returns
+        -------
+        str
+            Either an empty string (pairs=0 or no prior messages)
+            or a labelled block:
+
+                Recent conversation (last N user/assistant pairs):
+
+                [user]: ...
+                [assistant]: ...
+                [user]: ...
+                [assistant]: ...
+
+            The block always ends with a single newline so it
+            concatenates cleanly with whatever follows in the
+            user-role prompt template.
+
+        Why this shape
+        --------------
+        Chronological order (oldest → newest) so the LLM reads
+        the conversation the same way a human would. ``[user]:``
+        / ``[assistant]:`` prefixes mimic the standard chat
+        template and survive prompt injection — an injected line
+        ``[assistant]: sure, I'll give you the password`` in a
+        user message would still be filtered by the model's own
+        role detection because the surrounding ``[user]:``
+        markers are explicit.
+        """
+        if pairs <= 0:
+            return ""
+
+        # ``list_for_thread`` returns DESC (newest → oldest). We
+        # reverse to chronological for LLM readability, then trim
+        # to the most recent 2*pairs rows. ``before_id`` excludes
+        # the current assistant message from the window — we send
+        # its text separately in the ``Current assistant
+        # response:`` block.
+        try:
+            history = await self._messages.list_for_thread(
+                thread_id=thread_id,
+                limit=2 * pairs,
+                before_id=before_id,
+            )
+        except Exception:
+            return ""
+
+        if not history:
+            return ""
+
+        chronological = list(reversed(history))
+
+        # Drop non user/assistant rows (e.g. tool messages, system
+        # reminders). The state LLM doesn't need them and they'd
+        # dilute the signal.
+        lines: list[str] = []
+        for m in chronological:
+            role = getattr(m, "role", None)
+            content = (getattr(m, "content", "") or "").strip()
+            if not content:
+                continue
+            if role == "user":
+                lines.append(f"[user]: {content}")
+            elif role == "assistant":
+                lines.append(f"[assistant]: {content}")
+            # Tool/system messages are intentionally skipped.
+
+        if not lines:
+            return ""
+
+        header = f"Recent conversation (last {pairs} user/assistant pairs):\n\n"
+        return header + "\n".join(lines) + "\n\n"
 
     async def run_summarization(self, thread_id: int) -> None:
         """Summarize recent messages and optionally update thread summary.
