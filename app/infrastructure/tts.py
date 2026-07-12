@@ -179,8 +179,35 @@ class MiniMaxTTSProvider:
             # carry the operator-visible reason (not just a status code).
             snippet = resp.text[:200]
             raise RuntimeError(f"TTS provider {resp.status_code}: {snippet}")
-        parsed = self._parse_response(resp)
-        return bytes.fromhex(parsed.audio_hex)
+        # Validate the JSON envelope **before** the audio-decode path so
+        # the user sees a meaningful "what did MiniMax return" message
+        # rather than a downstream ValueError from bytes.fromhex("").
+        # Common causes for the 200-but-empty case: model requires a
+        # different voice_id than the one we sent, billing/quota
+        # exhaustion, or a region-only authentication scope.
+        try:
+            peek = resp.json()
+        except Exception as exc:
+            raise RuntimeError(
+                f"TTS provider returned 200 but body is not JSON: {resp.text[:200]!r}"
+            ) from exc
+        if not isinstance(peek, dict):
+            raise RuntimeError(
+                f"TTS provider returned 200 but top-level is {type(peek).__name__}, "
+                f"not object: {resp.text[:200]!r}"
+            )
+        data = peek.get("data")
+        audio_hex = (data or {}).get("audio") if isinstance(data, dict) else None
+        if isinstance(audio_hex, str) and audio_hex:
+            return bytes.fromhex(audio_hex)
+        # Truncate so the error stays under the FastAPI 200-char default
+        # response-size hint while still leaving a recognisable shape
+        # the operator can paste into a debugging session.
+        preview = resp.text[:400]
+        raise RuntimeError(
+            f"TTS response missing data.audio: status={resp.status_code} "
+            f"keys={list(peek.keys())!r} body_preview={preview!r}"
+        )
 
     @staticmethod
     def _parse_response(resp: httpx.Response) -> MiniMaxTTSResponse:
