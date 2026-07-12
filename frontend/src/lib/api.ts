@@ -124,6 +124,19 @@ export interface AppConfig {
   theme: string;
   thread_summary_enabled: boolean;
   thread_summary_interval: number;
+  // ── TTS (text-to-speech) ────────────────────────────────────
+  // Server mirrors these so the Settings page can edit them in place.
+  // ``tts_api_key_configured`` is a boolean (not the key itself) so the
+  // page can show a "configured" badge without leaking the secret.
+  tts_api_key_configured: boolean;
+  tts_base_url: string;
+  tts_cache_dir: string;
+  tts_model: string;
+  /** Active provider — one of "disabled", "mock", "minimax". */
+  tts_provider: 'disabled' | 'minimax' | 'mock';
+  /** Speech rate (0.5..2.0) — clamped by the server. */
+  tts_speed: number;
+  tts_voice_id: string;
   /** Backend package version, mirrored from pyproject.toml. */
   version: string;
 }
@@ -734,6 +747,15 @@ export const api = {
     theme?: string;
     thread_summary_enabled?: boolean;
     thread_summary_interval?: number;
+    // TTS keys mirror the pydantic schema. ``tts_provider`` is a
+    // union of the three legal values (validated server-side).
+    tts_api_key?: null | string;
+    tts_base_url?: null | string;
+    tts_cache_dir?: null | string;
+    tts_model?: null | string;
+    tts_provider?: 'disabled' | 'minimax' | 'mock' | null;
+    tts_speed?: null | number;
+    tts_voice_id?: null | string;
   }) => request<AppConfig>('/api/config', { body: JSON.stringify(data), method: 'POST' }),
 
   updateKnowledge: (botId: number, entryId: string, content: string) =>

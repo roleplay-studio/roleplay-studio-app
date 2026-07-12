@@ -60,13 +60,31 @@
   let editHistoryLimit = $state(1000);
   let editKnowledgeThreshold = $state(0.3);
   let editLanguage = $state('en');
+  // ── TTS (text-to-speech) ──────────────────────────────────────
+  // We don't hold the raw API key — empty string means "leave the
+  // existing key untouched" (matches the embedding pattern at L307).
+  // The configured/not-configured status comes through the boolean
+  // ``tts_api_key_configured`` field of AppConfig.
+  let editTtsProvider = $state<'disabled' | 'minimax' | 'mock'>('disabled');
+  let editTtsBaseUrl = $state('https://api.minimaxi.com/v1');
+  let editTtsVoiceId = $state('english_female_1');
+  let editTtsModel = $state('speech-02-turbo');
+  let editTtsSpeed = $state(1.0);
+  let editTtsCacheDir = $state('tts_cache');
+  let editTtsApiKey = $state('');
   let themePref = $state('system');
   let saveError = $state('');
   let saved = $state(false);
   let reindexing = $state(false);
   let reindexDone = $state(false);
-  let activeTab: 'generation' | 'interface' | 'knowledge' | 'memory' | 'provider' | 'system' =
-    $state('provider');
+  let activeTab:
+    | 'generation'
+    | 'interface'
+    | 'knowledge'
+    | 'memory'
+    | 'provider'
+    | 'system'
+    | 'tts' = $state('provider');
 
   // Reindex banner / modal (stale-collection rebuild flow)
   let staleBotIds = $state<number[]>([]);
@@ -232,6 +250,16 @@
       editHistoryLimit = cfg.history_limit ?? 1000;
       editKnowledgeThreshold = cfg.knowledge_relevance_threshold ?? 0.3;
       editLanguage = cfg.language || 'en';
+      // ── TTS (text-to-speech) ──────────────────────────────────────
+      editTtsProvider = cfg.tts_provider;
+      editTtsBaseUrl = cfg.tts_base_url;
+      editTtsVoiceId = cfg.tts_voice_id;
+      editTtsModel = cfg.tts_model;
+      editTtsSpeed = cfg.tts_speed;
+      editTtsCacheDir = cfg.tts_cache_dir;
+      // Empty until the user types — config!.tts_api_key_configured
+      // tells the UI to render the "configured" badge.
+      editTtsApiKey = '';
       themePref = getThemePreference();
     } catch (e) {
       console.error(e);
@@ -319,6 +347,19 @@
         temperature: editTemperature,
         thread_summary_enabled: editThreadSummaryEnabled,
         thread_summary_interval: editThreadSummaryInterval,
+        // ── TTS (text-to-speech) ─────────────────────────────────
+        // Empty string maps to "no change" on the server side —
+        // same convention as the embedding key above. The page's
+        // "configured" badge is driven by the response flag, so
+        // the user gets feedback that the save stuck without us
+        // ever round-tripping the actual key.
+        tts_api_key: editTtsApiKey ? editTtsApiKey : undefined,
+        tts_base_url: editTtsBaseUrl,
+        tts_cache_dir: editTtsCacheDir,
+        tts_model: editTtsModel,
+        tts_provider: editTtsProvider,
+        tts_speed: editTtsSpeed,
+        tts_voice_id: editTtsVoiceId,
       });
       saved = true;
       setTimeout(() => (saved = false), 3000);
@@ -484,6 +525,32 @@
             ></span
           >
           <span class="tab-label">{t('settings.tab_interface', lang)}</span>
+        </button>
+        <button
+          class="settings-tab"
+          class:active={activeTab === 'tts'}
+          onclick={() => (activeTab = 'tts')}
+        >
+          <span class="tab-icon"
+            ><svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              class="lucide lucide-volume-2-icon lucide-volume-2"
+              ><path
+                d="M11 4.702a.705.705 0 0 0-1.203-.498L6.025 8.629a.7.7 0 0 1-.488.197H3.702A1.7 1.7 0 0 0 2 10.532v2.936a1.7 1.7 0 0 0 1.702 1.706h2.836a.7.7 0 0 1 .488.197l3.772 4.425a.705.705 0 0 0 1.203-.498V4.702Z"
+              /><path d="M18.885 9.145a7 7 0 0 0-1.39 7.71" /><path
+                d="M21.543 6.578a10 10 0 0 0-1.886 10.452"
+              /></svg
+            ></span
+          >
+          <span class="tab-label">{t('settings.tab_tts', lang)}</span>
         </button>
         <button
           class="settings-tab"
@@ -1159,6 +1226,98 @@
           </div>
         </section>
       {/if}
+
+      {#if activeTab === 'tts'}
+        <section class="settings-section">
+          <div class="ray-card">
+            <h2 class="subsection-title">TTS</h2>
+            <p class="section-hint">{t('settings.tab_tts_hint', lang)}</p>
+
+            <div class="field-group">
+              <label class="field-label">Provider</label>
+              <Select
+                bind:value={editTtsProvider}
+                options={[
+                  { label: 'Disabled', value: 'disabled' },
+                  { label: 'Mock (local stub)', value: 'mock' },
+                  { label: 'MiniMax', value: 'minimax' },
+                ]}
+              />
+            </div>
+
+            {#if editTtsProvider === 'minimax'}
+              <div class="field-group">
+                <label class="field-label">Base URL</label>
+                <Input bind:value={editTtsBaseUrl} placeholder="https://api.minimaxi.com/v1" />
+              </div>
+
+              <div class="field-group">
+                <label class="field-label">
+                  API Key
+                  {#if config?.tts_api_key_configured}
+                    <span class="configured-badge">configured</span>
+                  {/if}
+                </label>
+                <Input
+                  type="password"
+                  bind:value={editTtsApiKey}
+                  placeholder={config?.tts_api_key_configured ? '••••' : 'sk-...'}
+                />
+                <p class="field-hint">
+                  Leave empty to keep the existing key. Falls back to LLM_API_KEY if unset.
+                </p>
+              </div>
+
+              <div class="field-group">
+                <label class="field-label">Voice ID</label>
+                <Input bind:value={editTtsVoiceId} placeholder="english_female_1" />
+              </div>
+
+              <div class="field-group">
+                <label class="field-label">Model</label>
+                <Input bind:value={editTtsModel} placeholder="speech-02-turbo" />
+              </div>
+
+              <div class="field-group">
+                <label class="field-label">Speech rate</label>
+                <div class="range-wrap">
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="2.0"
+                    step="0.1"
+                    bind:value={editTtsSpeed}
+                    class="ray-range"
+                  />
+                  <code class="range-value">×{editTtsSpeed.toFixed(1)}</code>
+                </div>
+              </div>
+
+              <div class="field-group">
+                <label class="field-label">Cache directory</label>
+                <Input bind:value={editTtsCacheDir} placeholder="tts_cache" />
+                <p class="field-hint">
+                  Relative paths resolve under ROLEPLAY_DATA_DIR. The folder is created on first
+                  synthesis.
+                </p>
+              </div>
+            {/if}
+
+            {#if editTtsProvider === 'disabled'}
+              <p class="field-hint">
+                TTS is off — the play button stays hidden in every chat thread.
+              </p>
+            {/if}
+
+            {#if editTtsProvider === 'mock'}
+              <p class="field-hint">
+                Mock provider returns a deterministic stub MP3 (no API call, no cost). Use for local
+                dev / E2E smoke runs.
+              </p>
+            {/if}
+          </div>
+        </section>
+      {/if}
     </div>
   {/if}
 </div>
@@ -1694,6 +1853,24 @@
        when skimming the System section. */
     background: linear-gradient(135deg, #f59e0b, #ef4444);
     box-shadow: 0 0 8px color-mix(in srgb, #f59e0b 30%, transparent);
+  }
+  /* Small "configured" pill next to the TTS API key label. Differentiated
+     from the dev-mode env-badge by a calmer green gradient so users
+     can skim the page and find it without it being a system alarm. */
+  .configured-badge {
+    display: inline-flex;
+    align-items: center;
+    margin-left: 8px;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-family: 'Maple Mono', system-ui, sans-serif;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: #fff;
+    background: linear-gradient(135deg, #34d399, #10b981);
+    box-shadow: 0 0 6px color-mix(in srgb, #10b981 30%, transparent);
   }
   /* Secondary text next to a config value — used to show the raw
      DEBUG env var so the user can tell "unset" from "explicitly
