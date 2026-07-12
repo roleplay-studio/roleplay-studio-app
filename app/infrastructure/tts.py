@@ -97,6 +97,10 @@ class MiniMaxTTSProvider:
         if key is None:
             eff = settings.effective_tts_api_key
             key = eff.get_secret_value() if eff is not None else None
+        # Tracks whether the operator set an explicit ``TTS_API_KEY``
+        # (vs. inheriting ``LLM_API_KEY``). Used at error time so the
+        # message can guide them to the right env var.
+        self._key_was_explicit = settings.tts_api_key is not None
         if not key:
             raise ValueError("TTS_API_KEY (or LLM_API_KEY) is required for MiniMaxTTSProvider")
         self._api_key = key
@@ -199,6 +203,25 @@ class MiniMaxTTSProvider:
                 f"TTS provider returned 200 but top-level is {type(peek).__name__}, "
                 f"not object: {resp.text[:200]!r}"
             )
+        # MiniMax soft-failure convention: HTTP 200 with
+        # ``base_resp.status_code != 0``. The ``status_msg`` field is
+        # the operator-facing reason; without this branch we
+        # would surface the same generic "missing data.audio" for
+        # invalid keys (2049), quota exhaustion (2053), and rate
+        # limiting — all of which are configuration / billing
+        # issues, not malformed responses.
+        base_resp = peek.get("base_resp")
+        if isinstance(base_resp, dict):
+            br_code = base_resp.get("status_code")
+            br_msg = base_resp.get("status_msg") or base_resp.get("status") or "(no message)"
+            if br_code not in (None, 0):
+                _dump_raw_response("minimax", f"base_resp_{br_code}", resp, resp.text)
+                where = "TTS_API_KEY" if self._key_was_explicit else "LLM_API_KEY (TTS_API_KEY is unset so the chat key is being reused)"
+                raise RuntimeError(
+                    f"TTS provider rejected request: status_code={br_code} "
+                    f"status_msg={br_msg!r} — verify the key used by {where} "
+                    f"is a MiniMax API key with TTS access"
+                )
         data = peek.get("data")
         audio_hex = (data or {}).get("audio") if isinstance(data, dict) else None
         if isinstance(audio_hex, str) and audio_hex:
