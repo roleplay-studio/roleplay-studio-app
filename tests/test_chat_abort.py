@@ -117,6 +117,10 @@ class _FakeKnowledge:
     async def search(self, bot_id, query, top_k=15):
         return []
 
+    async def has_documents(self, bot_id):
+        return False
+
+
 
 def _make_service(messages: _FakeMessages, orch: _FakeOrchestrator) -> ChatService:
     return ChatService(

@@ -64,15 +64,23 @@ configure_logging(Settings.from_env())
 
 async def main():
     config = Config()
-    config.bind = ["127.0.0.1:55245"]
+    # Bind address: defaults to 127.0.0.1:55245 (the production
+    # Tauri launcher behaviour), but the Docker dev stack needs
+    # 0.0.0.0 so the frontend container can reach the backend by
+    # service name. HYPERCORN_BIND overrides both host and port.
+    bind_addr = os.environ.get("HYPERCORN_BIND", "127.0.0.1:55245")
+    config.bind = [bind_addr]
     config.use_reloader = False
-    config.loglevel = "info"
+    # Honour $LOG_LEVEL (set by the docker-compose env block) so
+    # operators can flip to WARNING without rebuilding. Defaults
+    # to INFO to match the pre-Docker behaviour.
+    config.loglevel = os.environ.get("LOG_LEVEL", "info").lower()
     # Allow larger uploads (10 MB default, bump to 100 MB)
     try:
         config.limits.max_body = 100 * 1024 * 1024  # 100 MB
     except AttributeError:
         pass  # older Hypercorn doesn't have limits
-    print(f"[backend] Starting Roleplay Studio API on {config.bind[0]}")
+    print(f"[backend] Starting Roleplay Studio API on {bind_addr}")
     print(f"[backend] Data directory: {_DATA_DIR}")
     await serve(app, config)
 

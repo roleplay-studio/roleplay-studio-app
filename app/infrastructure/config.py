@@ -23,7 +23,7 @@ Notes
   ``Settings()`` directly.
 * Some fields have non-trivial derivation rules that don't map to
   pydantic's default env parsing (e.g. ``embedding_api_key`` falls
-  back to ``openrouter_api_key``, ``debug_enabled`` is true when
+  back to ``llm_api_key``, ``debug_enabled`` is true when
   ``DEBUG=true`` OR ``ENVIRONMENT=development``). These use
   ``@model_validator(mode="after")``.
 * Fields that need Python-side defaults computed at import time
@@ -101,16 +101,27 @@ class Settings(BaseSettings):
     )
 
     # ── LLM ─────────────────────────────────────────────────────────
+    # The default provider is OpenRouter, but the same key/URL pair
+    # works against any OpenAI-compatible endpoint (LM Studio, Ollama,
+    # vLLM, …). Field names therefore stay generic.
+    #
     # m15: keys are wrapped in SecretStr so they don't accidentally end
     # up in logs, Sentry, or debugger locals. Access via
-    # ``settings.openrouter_api_key.get_secret_value()``.
-    openrouter_api_key: SecretStr | None = None
-    openrouter_base_url: str = "https://openrouter.ai/api/v1"
+    # ``settings.llm_api_key.get_secret_value()``.
+    llm_api_key: SecretStr | None = None
+    llm_base_url: str = "https://openrouter.ai/api/v1"
+    # M16: ``llm_provider`` selects which LLM implementation
+    # ``app.bootstrap.build_container`` wires into the application.
+    # ``"openrouter"`` (default) drives the real ``OpenRouterLLM`` over
+    # HTTPS, ``"mock"`` swaps in ``MockLLM`` — a deterministic, zero-cost
+    # in-process simulator used by E2E suites and CI. Any future
+    # provider (Ollama, vLLM, Anthropic) would add a value here.
+    llm_provider: Literal["mock", "openrouter"] = "openrouter"
     chat_model: str = "openai/gpt-oss-20b"
     fast_model: str = "openai/gpt-4o-mini"
     embedding_model: str = "qwen/qwen3-embedding-8b"
     # M13: the raw env value. Use ``effective_embedding_base_url`` to
-    # get the post-fallback URL (defaults to ``openrouter_base_url``
+    # get the post-fallback URL (defaults to ``llm_base_url``
     # when unset). Storing the raw value preserves the distinction
     # between "unset" and "explicitly empty" so a configuration
     # save-roundtrip doesn't accidentally clear an intentional
@@ -141,7 +152,14 @@ class Settings(BaseSettings):
 
     # ── RAG / Memory ───────────────────────────────────────────────
     knowledge_relevance_threshold: float = Field(0.3, ge=0.0, le=1.0)
-    history_limit: int = Field(200, ge=10)
+    # Maximum messages loaded from the DB for the LLM context.
+    # Raised from 200 to 1000 so DEBUG1-class threads (>200 messages)
+    # don't silently drop history before context compression even
+    # gets a chance to run. ``_load_full_history`` logs a warning
+    # when the DB actually holds more rows than this cap, so users
+    # that hit the limit again can raise it from Settings instead
+    # of wondering "where did my old messages go".
+    history_limit: int = Field(1000, ge=10)
 
     # ── Summarization ─────────────────────────────────────────────
     summarize_enabled: bool = True
@@ -155,6 +173,18 @@ class Settings(BaseSettings):
     context_compression_keep_recent: int = Field(20, ge=0)
     summarize_batch_enabled: bool = True
     summarize_batch_size: int = Field(3, ge=1, le=20)
+
+    # ── State context ─────────────────────────────────────────────
+    # Number of recent user/assistant pairs the state-generation
+    # LLM sees alongside the previous state snapshot. The default
+    # (10 pairs) is chosen to match SUMMARIZE_RECENT_LIMIT so the
+    # 'recent' window has the same ceiling everywhere. Without
+    # this, ``regenerate_state`` only sees the previous state plus
+    # the current exchange — anything between the last successful
+    # state regen and now is lost, so the regenerator must guess.
+    # Set to 0 to restore the legacy minimal prompt (only current
+    # user + assistant + previous state).
+    state_context_pairs: int = Field(10, ge=0)
 
     # ── UI / Debug ─────────────────────────────────────────────────
     # m12: backward-compat shim. The original code stored these under
@@ -246,7 +276,7 @@ class Settings(BaseSettings):
         pydantic-settings v2 does NOT pass env values to ``mode="before"``
         validators — they only see explicit kwargs. The pre-pydantic
         behaviour treated ``EMBEDDING_API_KEY=***`` as "no auth" and
-        ``EMBEDDING_BASE_URL=***`` as "use openrouter_base_url". We
+        ``EMBEDDING_BASE_URL=***`` as "use llm_base_url". We
         preserve that by stripping empty strings *here* so the field
         stores ``None`` and the consumer's ``effective_embedding_*``
         helpers apply the right fallback. Explicit non-empty values
@@ -294,14 +324,14 @@ class Settings(BaseSettings):
         """Embedding endpoint URL resolved from env-or-default.
 
         Returns ``self.embedding_base_url`` when set, else
-        ``self.openrouter_base_url``. This is a convenience for
+        ``self.llm_base_url``. This is a convenience for
         callers (HttpEmbeddings, vectorstore) that don't want to
-        repeat the ``or self.openrouter_base_url`` pattern.
+        repeat the ``or self.llm_base_url`` pattern.
         """
-        return self.embedding_base_url or self.openrouter_base_url
+        return self.embedding_base_url or self.llm_base_url
 
-    def require_openrouter_api_key(self) -> str:
-        """Return the OpenRouter API key or raise ConfigurationError.
+    def require_llm_api_key(self) -> str:
+        """Return the LLM API key or raise ConfigurationError.
 
         Unwraps the SecretStr so callers (HTTP clients) can use the
         raw value without seeing the type noise.
@@ -314,9 +344,9 @@ class Settings(BaseSettings):
         # ``app.application.exceptions`` for backward compat.
         from app.domain.exceptions import ConfigurationError
 
-        if self.openrouter_api_key is None:
-            raise ConfigurationError("OPENROUTER_API_KEY environment variable is required")
-        return self.openrouter_api_key.get_secret_value()
+        if self.llm_api_key is None:
+            raise ConfigurationError("LLM_API_KEY environment variable is required")
+        return self.llm_api_key.get_secret_value()
 
     @property
     def data_dir(self) -> Path:

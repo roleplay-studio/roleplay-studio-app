@@ -57,6 +57,7 @@
   let editContextCompressionEnabled = $state(true);
   let editContextCompressionThreshold = $state(50);
   let editContextCompressionKeepRecent = $state(20);
+  let editHistoryLimit = $state(1000);
   let editKnowledgeThreshold = $state(0.3);
   let editLanguage = $state('en');
   let themePref = $state('system');
@@ -209,7 +210,7 @@
       providers = provs;
       languages = langs;
       editProvider = 'openrouter';
-      editBaseUrl = cfg.openrouter_base_url;
+      editBaseUrl = cfg.llm_base_url;
       editModel = cfg.chat_model;
       editTemperature = cfg.default_temperature;
       editMaxTokens = cfg.default_max_tokens;
@@ -228,6 +229,7 @@
       editContextCompressionEnabled = cfg.context_compression_enabled;
       editContextCompressionThreshold = cfg.context_compression_threshold ?? 50;
       editContextCompressionKeepRecent = cfg.context_compression_keep_recent ?? 20;
+      editHistoryLimit = cfg.history_limit ?? 1000;
       editKnowledgeThreshold = cfg.knowledge_relevance_threshold ?? 0.3;
       editLanguage = cfg.language || 'en';
       themePref = getThemePreference();
@@ -307,6 +309,7 @@
         embedding_base_url: editEmbeddingBaseUrl,
         embedding_model: editEmbedding,
         fast_model: editFastModel,
+        history_limit: editHistoryLimit,
         knowledge_relevance_threshold: editKnowledgeThreshold,
         language: editLanguage,
         max_tokens: editMaxTokens,
@@ -794,6 +797,24 @@
                 </p>
               </div>
             {/if}
+
+            <div class="field-group">
+              <label class="field-label">{t('settings.history_limit_label', lang)}</label>
+              <div class="range-wrap">
+                <input
+                  type="range"
+                  min="50"
+                  max="2000"
+                  step="50"
+                  bind:value={editHistoryLimit}
+                  class="ray-range"
+                />
+                <code class="range-value">{editHistoryLimit} msgs</code>
+              </div>
+              <p class="field-hint">
+                {t('settings.history_limit_hint', lang)}
+              </p>
+            </div>
           </div>
         </section>
       {/if}
@@ -1070,7 +1091,7 @@
               </div>
               <div class="config-row">
                 <div class="config-key">Base URL</div>
-                <code class="config-code">{config!.openrouter_base_url}</code>
+                <code class="config-code">{config!.llm_base_url}</code>
               </div>
               <div class="config-row">
                 <div class="config-key">Temperature</div>
@@ -1113,6 +1134,10 @@
                       ' recent'
                     : 'off'}</code
                 >
+              </div>
+              <div class="config-row">
+                <div class="config-key">History Limit</div>
+                <code class="config-code">{config!.history_limit} msgs</code>
               </div>
               <div class="config-row">
                 <div class="config-key">RAG Threshold</div>

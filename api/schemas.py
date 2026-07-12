@@ -23,6 +23,11 @@ class UpdateConfigRequest(BaseModel):
     context_compression_enabled: bool | None = None
     context_compression_threshold: int | None = None
     context_compression_keep_recent: int | None = None
+    # Cap on messages loaded from the DB for the LLM context.
+    # ``None`` leaves the existing value alone so the Settings page
+    # can omit it from its PATCH (saves don't overwrite fields the
+    # user didn't change). ``Field(ge=10)`` mirrors Settings.
+    history_limit: int | None = Field(default=None, ge=10)
 
 
 class UpdateBotRequest(BaseModel):
@@ -36,6 +41,8 @@ class UpdateBotRequest(BaseModel):
     bot_type: BotType = BotType.RP
     alternate_greetings: list[str] = Field(default_factory=list)
     mes_example: str | None = None
+    dynamic_system_prompt: str = ""
+    world_state_prompt: str = ""
 
 
 class ChatRequest(BaseModel):
@@ -50,7 +57,18 @@ class KnowledgeRequest(BaseModel):
 
 
 class EditMessageRequest(BaseModel):
+    # New content for the branched assistant/user message. Remains
+    # ``min_length=1`` for backward compat with the existing
+    # message-edit UI — a future "edit state only" flow can relax
+    # this when the EditMessageModal ships a dedicated state field.
     content: str = Field(min_length=1)
+    # Optional world-state snapshot for the new branch. ``None`` (not
+    # present in the request body) keeps the original message's state
+    # on the new branch — preserves branching fidelity. ``""`` clears
+    # the snapshot explicitly. ``<not-empty string>`` overwrites it.
+    # The EditMessageModal on the assistant-message surface sends this
+    # only when the state textarea is dirty.
+    state: str | None = None
 
 
 class ConfigureRequest(BaseModel):
@@ -63,6 +81,17 @@ class ConfigureRequest(BaseModel):
 class RegenerateRequest(BaseModel):
     bot_id: int
     persona_id: int | None = None
+
+
+class RegenerateStateRequest(BaseModel):
+    """Body for the manual state-regeneration endpoint.
+
+    The assistant message id is enough — the orchestrator looks up the
+    parent thread, the previous assistant message (for the prior state),
+    and the bot (for ``world_state_prompt``).
+    """
+
+    assistant_message_id: int
 
 
 # ── Bot Export / Import ──────────────────────────────────────────────────
@@ -79,6 +108,11 @@ class BotExportData(BaseModel):
     scenario: str = ""
     categories: list[str] = Field(default_factory=list)
     bot_type: str = "rp"
+    # Round-tripped through export/import so a bot created on machine
+    # A keeps its floating prompt and state-gen schema on machine B.
+    # Empty string = feature not used by this bot (default).
+    dynamic_system_prompt: str = ""
+    world_state_prompt: str = ""
 
 
 class ImportBotRequest(BaseModel):
@@ -93,6 +127,8 @@ class ImportBotRequest(BaseModel):
     categories: list[str] = Field(default_factory=list)
     bot_type: str = "rp"
     knowledge: list[str] | None = None
+    dynamic_system_prompt: str = ""
+    world_state_prompt: str = ""
 
 
 # ── Settings / Categories ─────────────────────────────────────────

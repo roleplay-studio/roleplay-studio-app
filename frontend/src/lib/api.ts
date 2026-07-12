@@ -2,6 +2,31 @@
 
 const DEFAULT_API_BASE = 'http://127.0.0.1:55245';
 
+// When running behind the Vite dev server (host or Docker) the
+// API is reachable on the same origin via the /api proxy. We
+// detect that by checking the build-time VITE_USE_PROXY flag —
+// set automatically by docker-compose and ignored otherwise.
+//
+// This means `npm run dev` on the host still hits :55245
+// directly (the previous behaviour, no surprises), but
+// `docker compose up` automatically uses relative URLs that go
+// through Vite → backend container. No environment-switch dance
+// needed at the JS layer.
+const USE_PROXY =
+  // Vite injects import.meta.env.* at build time; the boolean
+  // cast works whether the flag was set as `true` or `"true"`.
+  // string('true') === true, so the negation below is safe.
+  // We invert because a missing flag is the historical default
+  // (direct fetch from :55245).
+  String(import.meta.env?.VITE_USE_PROXY ?? '').toLowerCase() === 'true';
+
+const PROXY_API_BASE =
+  typeof window !== 'undefined' && window.location?.origin
+    ? window.location.origin
+    : DEFAULT_API_BASE;
+
+const INITIAL_API_BASE = USE_PROXY ? PROXY_API_BASE : DEFAULT_API_BASE;
+
 /**
  * Resolved API base URL. Re-reads `localStorage.serverUrl` on every
  * `apiBase()` call. Use as `apiBase()` instead of `API_BASE` in
@@ -19,7 +44,7 @@ export function apiBase(): string {
   } catch {
     /* localStorage unavailable — fall through */
   }
-  return DEFAULT_API_BASE;
+  return INITIAL_API_BASE;
 }
 
 /**
@@ -92,7 +117,7 @@ export interface AppConfig {
   history_limit: number;
   knowledge_relevance_threshold: number;
   language: string;
-  openrouter_base_url: string;
+  llm_base_url: string;
   summarize_enabled: boolean;
   summarize_max_tokens: number;
   summarize_min_length: number;
@@ -114,6 +139,9 @@ export interface Bot {
    *  Empty array when every category is currently valid. */
   categories_invalid: string[];
   description: string;
+  /** Floating system reminder injected right before the last user turn on
+   *  every chat request. Empty string = no floating prompt (default). */
+  dynamic_system_prompt?: string;
   first_message: string;
   id: number;
   /** V1/V2/V3 character card `mes_example` — few-shot dialogue examples.
@@ -124,21 +152,27 @@ export interface Bot {
   personality: string;
   scenario: string;
   thread_count: number;
+  /** System prompt for the background state-update task. The bot
+   *  developer owns the output format via this prompt. Empty string =
+   *  no background state generation. */
+  world_state_prompt?: string;
 }
 
 /** The shape of the serialized bot inside a version snapshot. Mirrors
- *  the editable fields of `Bot` — id and relationships are omitted. */
+ * the editable fields of `Bot` — id and relationships are omitted. */
 export interface BotSnapshot {
   alternate_greetings: string[];
   avatar_path: null | string;
   bot_type: BotType;
   categories: string[];
   description: string;
+  dynamic_system_prompt: string;
   first_message: string;
   mes_example: string;
   name: string;
   personality: string;
   scenario: string;
+  world_state_prompt: string;
 }
 
 /** A snapshot of a Bot at the moment of capture. */
@@ -189,6 +223,10 @@ export interface Message {
   branch_index: number;
   content: string;
   created_at: null | string;
+  /** Captured at stream time so the chat UI can render the floating
+   *  prompt panel. Set on assistant messages only when the bot has a
+   *  non-empty dynamic_system_prompt. */
+  dynamic_system_prompt?: null | string;
   id: null | number;
   is_active: boolean;
   /** Chain-of-thought from a reasoning-capable LLM (DeepSeek, QwQ, ...).
@@ -199,6 +237,12 @@ export interface Message {
   reasoning?: string;
   role: 'assistant' | 'system' | 'user';
   short_content: string;
+  /** Per-message world-state snapshot (opaque string — bot author
+   *  owns the format via ``Bot.world_state_prompt``). Populated by the
+   *  background state-update task after each assistant response;
+   *  undefined on messages that predate the feature or where the bot
+   *  has no world_state_prompt. */
+  state?: null | string;
   versions?: Message[];
 }
 
@@ -223,13 +267,16 @@ export interface RecentThread {
   thread_id: number;
 }
 
-// ── Dev-mode LLM debug payload ───────────────────────────────────────
-//
-// These types mirror the `LLMDebugInfo` Pydantic DTO and the
-// `type: "usage"` SSE event sent by the backend. The dev-mode chat
-// modal reads them to display the real LLM request payload and the
-// per-request token counts. In production the SSE events are never
-// emitted, so the frontend never sees these shapes.
+/** Header-level stats from `GET /api/threads/{id}/stats`.
+ *
+ * Distinct from `listMessages` — `message_count` is the real full-thread
+ * total (including older pages), independent of the 50-message pagination
+ * window the chat UI fetches. The chat header binds to this, never to the
+ * length of the locally-loaded messages array.
+ */
+// (Defined further down so the file remains alpha-sorted by interface
+// name for ESLint perfectionist's sort-modules rule. The interface
+// itself is the same; see chat header binding for usage.)
 
 export interface ReindexJobState {
   bots_done: number;
@@ -272,6 +319,22 @@ export interface ThreadFileDTO {
   message_id: null | number;
   storage_path: string;
   thread_id: number;
+}
+
+/** Header-level stats from `GET /api/threads/{id}/stats`.
+ *
+ * Distinct from `listMessages` — `message_count` is the real full-thread
+ * total (including older pages), independent of the 50-message pagination
+ * window the chat UI fetches. The chat header binds to this, never to the
+ * length of the locally-loaded messages array.
+ *
+ * Note: declared after ``ThreadFileDTO`` so ESLint perfectionist's
+ * sort-modules rule sees the alpha order (``Th...Fi...`` then ``Th...St...``).
+ */
+export interface ThreadStats {
+  message_count: number;
+  thread_id: number;
+  token_estimate: number;
 }
 
 export class ApiError extends Error {
@@ -472,6 +535,10 @@ export const api = {
   getPersona: (id: number) => request<Persona>(`/api/personas/${id}`),
   // Threads
   getThread: (id: number) => request<Thread>(`/api/threads/${id}`),
+  // Header-level thread stats used by the chat header — full count,
+  // independent of listMessages pagination. See Chat.svelte binding.
+  getThreadStats: (threadId: number) =>
+    request<ThreadStats>(`/api/threads/${threadId}/stats`),
   // Health
   health: () => request<{ status: string }>('/api/health'),
   importBot: async (file: File): Promise<{ id: number }> => {
@@ -634,14 +701,18 @@ export const api = {
   updateBot: (
     id: number,
     data: {
+      alternate_greetings?: string[];
       avatar_path?: null | string;
       bot_type?: BotType;
       categories?: string[];
       description?: string;
+      dynamic_system_prompt?: string;
       first_message: string;
+      mes_example?: string;
       name: string;
       personality: string;
       scenario?: string;
+      world_state_prompt?: string;
     },
   ) => request<{ ok: boolean }>(`/api/bots/${id}`, { body: JSON.stringify(data), method: 'PUT' }),
 
@@ -653,6 +724,7 @@ export const api = {
     embedding_base_url?: null | string;
     embedding_model?: string;
     fast_model?: string;
+    history_limit?: number;
     knowledge_relevance_threshold?: number;
     language?: string;
     max_tokens?: number;
@@ -671,10 +743,20 @@ export const api = {
       method: 'PUT',
     }),
 
-  // Message editing
-  updateMessage: (threadId: number, messageId: number, content: string) =>
+  // Message editing. ``state`` is the world-state snapshot column
+  // on the assistant message table — pass ``undefined`` to keep the
+  // original message's state on the new branch (branching fidelity),
+  // pass ``""`` to explicitly clear it, pass a string to overwrite.
+  // The EditMessageModal's "Save" sends the currently-typed value
+  // (including empty), so the network shape is always present.
+  updateMessage: (
+    threadId: number,
+    messageId: number,
+    content: string,
+    state?: null | string,
+  ) =>
     request<{ ok: boolean }>(`/api/threads/${threadId}/messages/${messageId}`, {
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, state: state ?? null }),
       method: 'PUT',
     }),
 

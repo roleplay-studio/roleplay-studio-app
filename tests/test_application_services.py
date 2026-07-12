@@ -35,6 +35,9 @@ class FakeBotRepository:
         bot_type="rp",
         alternate_greetings=None,
         mes_example="",
+        dynamic_system_prompt="",
+        world_state_prompt="",
+        **_extra: object,
     ):
         bot_id = self.next_id
         self.next_id += 1
@@ -50,6 +53,8 @@ class FakeBotRepository:
             "bot_type": bot_type,
             "alternate_greetings": alternate_greetings or [],
             "mes_example": mes_example,
+            "dynamic_system_prompt": dynamic_system_prompt,
+            "world_state_prompt": world_state_prompt,
         }
         return bot_id
 
@@ -65,6 +70,10 @@ class FakeBotRepository:
         categories=None,
         bot_type="rp",
         alternate_greetings=None,
+        mes_example="",
+        dynamic_system_prompt="",
+        world_state_prompt="",
+        **_extra: object,
     ):
         self.bots[bot_id].update(
             {
@@ -77,6 +86,9 @@ class FakeBotRepository:
                 "categories": categories or [],
                 "bot_type": bot_type,
                 "alternate_greetings": alternate_greetings or [],
+                "mes_example": mes_example,
+                "dynamic_system_prompt": dynamic_system_prompt,
+                "world_state_prompt": world_state_prompt,
             }
         )
 
@@ -165,6 +177,9 @@ class FakeKnowledgeRepository:
 
     async def list_entries(self, bot_id):
         return [KnowledgeEntryDTO(id="1", content="doc")]
+
+    async def has_documents(self, bot_id):
+        return True
 
     async def delete(self, bot_id, entry_id):
         pass

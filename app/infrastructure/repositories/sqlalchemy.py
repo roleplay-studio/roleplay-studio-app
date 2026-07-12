@@ -146,8 +146,9 @@ class SqlAlchemyStore:
         import sys
         from pathlib import Path
 
-        from alembic import command
         from alembic.config import Config as AlembicConfig
+
+        from alembic import command
 
         # m11: cheap re-entrancy guard. ``upgrade head`` itself is
         # idempotent, but this avoids the asyncio.to_thread spin-up
@@ -233,6 +234,8 @@ class SqlAlchemyBotRepository:
         bot_type: BotType = BotType.RP,
         alternate_greetings: list[str] | None = None,
         mes_example: str = "",
+        dynamic_system_prompt: str = "",
+        world_state_prompt: str = "",
     ) -> int:
         categories_json = json.dumps(categories or [])
         alternate_greetings_json = json.dumps(alternate_greetings or [])
@@ -248,6 +251,8 @@ class SqlAlchemyBotRepository:
                 bot_type=bot_type,
                 alternate_greetings=alternate_greetings_json,
                 mes_example=mes_example,
+                dynamic_system_prompt=dynamic_system_prompt,
+                world_state_prompt=world_state_prompt,
             )
             session.add(bot)
             await session.commit()
@@ -267,6 +272,8 @@ class SqlAlchemyBotRepository:
         bot_type: BotType = BotType.RP,
         alternate_greetings: list[str] | None = None,
         mes_example: str | None = None,
+        dynamic_system_prompt: str | None = None,
+        world_state_prompt: str | None = None,
     ) -> None:
         async with self._store._async_session_factory() as session:
             result = await session.execute(select(Bot).where(Bot.id == bot_id))
@@ -280,10 +287,15 @@ class SqlAlchemyBotRepository:
             bot.description = description
             bot.avatar_path = avatar_path
             bot.categories = json.dumps(categories or [])
-            bot.bot_type = bot_type
+            bot.bot_type = bot_type.value if hasattr(bot_type, "value") else bot_type
             bot.alternate_greetings = json.dumps(alternate_greetings or [])
+            bot.mes_example = mes_example or ""
             if mes_example is not None:
                 bot.mes_example = mes_example
+            if dynamic_system_prompt is not None:
+                bot.dynamic_system_prompt = dynamic_system_prompt
+            if world_state_prompt is not None:
+                bot.world_state_prompt = world_state_prompt
             session.add(bot)
             await session.commit()
 
@@ -541,6 +553,16 @@ class SqlAlchemyMessageRepository:
         timestamp: datetime | None = None,
         generation_status: str = "complete",
         reasoning: str | None = None,
+        dynamic_system_prompt: str | None = None,
+        # ``None`` (default) leaves ``state`` as NULL on insert —
+        # preserves historical behaviour where state was unset on
+        # user messages and pre-state-update assistant rows. ``""``
+        # explicitly stores an empty string. The combination is what
+        # lets ``ThreadService.update_message`` faithfully copy the
+        # original message's state into a new branch without losing
+        # the difference between "no snapshot yet" (NULL) and
+        # "snapshot was empty" (empty string).
+        state: str | None = None,
     ) -> int | None:
         if not content:
             return None
@@ -553,11 +575,18 @@ class SqlAlchemyMessageRepository:
                 role=role,
                 content=content,
                 reasoning=reasoning,
+                dynamic_system_prompt=dynamic_system_prompt,
                 short_content=short_content,
                 branch_group=branch_group,
                 branch_index=branch_index,
                 is_active=is_active,
                 generation_status=generation_status,
+                # SQLAlchemy treats ``None`` as "leave the column at
+                # its default (NULL)"; empty strings are persisted
+                # as empty strings. The aggregate list_for_thread
+                # projection reads them identically so the DTO
+                # contract holds either way.
+                state=state,
             )
             if timestamp is not None:
                 msg.timestamp = timestamp
@@ -576,6 +605,7 @@ class SqlAlchemyMessageRepository:
         timestamp: datetime | None = None,
         generation_status: str = "complete",
         reasoning: str | None = None,
+        state: str | None = None,
     ) -> int | None:
         return await self.save(
             thread_id,
@@ -587,6 +617,7 @@ class SqlAlchemyMessageRepository:
             timestamp=timestamp,
             generation_status=generation_status,
             reasoning=reasoning,
+            state=state,
         )
 
     async def save_exchange(
@@ -688,6 +719,17 @@ class SqlAlchemyMessageRepository:
                     )
 
             # 4. Build result with versions attached
+            # NOTE: ``msg.state`` and ``msg.dynamic_system_prompt`` are
+            # propagated into the DTO so the frontend can render
+            # the world-state panel and the floating-prompt panel.
+            # The 0.0.4 migration added ``state`` to ``Conversation``;
+            # the f1e2d3c4b5a6 migration added
+            # ``dynamic_system_prompt``. Without propagating them,
+            # the DTO is forever ``None`` regardless of what the
+            # background state-update task writes — the original 0.0.4
+            # code omitted the fields and tests didn't catch it
+            # because they round-tripped through the in-memory fake
+            # repo, which built the DTO directly.
             result: list[MessageDTO] = []
             for msg in reversed(messages):
                 if not msg.content:
@@ -698,6 +740,8 @@ class SqlAlchemyMessageRepository:
                     content=msg.content,
                     short_content=msg.short_content,
                     reasoning=msg.reasoning,
+                    state=msg.state,
+                    dynamic_system_prompt=msg.dynamic_system_prompt or None,
                     created_at=_ensure_tz(msg.timestamp),
                     branch_group=msg.branch_group,
                     branch_index=msg.branch_index,
@@ -715,6 +759,28 @@ class SqlAlchemyMessageRepository:
             )
             await session.commit()
 
+    async def count_active(self, thread_id: int) -> int:
+        """Count the active chain of messages in ``thread_id``.
+
+        Mirrors ``list_for_thread``'s branch-group filter: rows with
+        no branch_group plus the active row of any branch group.
+        Used by ``ThreadService.get_stats`` so the chat header reports
+        total messages rather than the latest paginated window.
+
+        Returns 0 for unknown / empty threads (no error — distinguishes
+        "missing" from "empty" via the route layer).
+        """
+        async with self._store._async_session_factory() as session:
+            result = await session.execute(
+                select(func.count(Conversation.id)).where(
+                    Conversation.thread_id == thread_id,
+                    (Conversation.branch_group.is_(None))
+                    | (Conversation.is_active.is_(True)),
+                    Conversation.content.isnot(None) & (Conversation.content != ""),
+                )
+            )
+            return int(result.scalar() or 0)
+
     async def update(self, message_id: int, content: str) -> None:
         if not content:
             return
@@ -728,6 +794,84 @@ class SqlAlchemyMessageRepository:
             msg.content = content
             session.add(msg)
             await session.commit()
+
+    async def update_state(self, message_id: int, state: str) -> None:
+        """Persist the bot's world-state snapshot for an assistant message.
+
+        Used by the background state-update task after each chat turn.
+        The state value is opaque (YAML, JSON, prose — whatever the
+        bot's ``world_state_prompt`` asks the LLM for). We do NOT
+        parse, validate, or constrain it.
+        """
+        async with self._store._async_session_factory() as session:
+            result = await session.execute(
+                select(Conversation).where(Conversation.id == message_id)
+            )
+            msg = result.scalar_one_or_none()
+            if msg is None:
+                raise NotFoundError(f"Message {message_id} was not found")
+            msg.state = state
+            session.add(msg)
+            await session.commit()
+
+    async def get_previous_assistant_state(
+        self, thread_id: int, before_message_id: int | None = None
+    ) -> str:
+        """Return the most recent non-empty ``state`` for an assistant
+        message in this thread, optionally restricted to messages with
+        id strictly less than ``before_message_id``.
+
+        Returns ``""`` when no such state exists.
+
+        Implementation notes:
+
+        1. A single targeted query (``WHERE role='assistant'
+           AND state IS NOT NULL AND state != '' ORDER BY id DESC LIMIT 1``)
+           is far cheaper and safer than ``list_for_thread(limit=2)`` —
+           the latter returns the two newest rows in DESC, which can both
+           be user messages if the conversation just had two consecutive
+           user turns (e.g. an edit that landed as a fresh insert), and
+           the caller would silently fall through to ``previous_state=""``
+           even though a perfectly valid state exists further back.
+
+        2. **Active-branch filter.** We must constrain the lookup to
+           messages on the *active* branch — the state-update
+           regenerator feeds the LLM the previous turn's snapshot so
+           it can carry world state across the conversation. A
+           regenerate / retry creates a new ``branch_group`` and
+           deactivates the old one (``is_active=False``); without
+           this filter, ``get_previous_assistant_state`` would happily
+           hand back a state from the stale inactive branch and the
+           regenerator would hallucinate a world-state carryover that
+           doesn't match what's actually on screen. Same applies to
+           messages with no ``branch_group`` — those are the
+           pre-branching legacy rows and they're always considered
+           active (they're the trunk).
+        """
+        async with self._store._async_session_factory() as session:
+            conditions = [
+                Conversation.thread_id == thread_id,
+                Conversation.role == "assistant",
+                Conversation.state.isnot(None),
+                Conversation.state != "",
+                # Branch-aware filter. ``branch_group IS NULL`` means
+                # the message predates branching and is always
+                # considered part of the active chain; otherwise
+                # only ``is_active=True`` rows count. The mirror
+                # condition lives in ``list_for_thread`` so the chat
+                # UI and the LLM see the same world.
+                (Conversation.branch_group.is_(None)) | (Conversation.is_active.is_(True)),
+            ]
+            if before_message_id is not None:
+                conditions.append(Conversation.id < before_message_id)
+            result = await session.execute(
+                select(Conversation.state)
+                .where(*conditions)
+                .order_by(Conversation.id.desc())
+                .limit(1)
+            )
+            value = result.scalar_one_or_none()
+            return value or ""
 
     async def delete(self, message_id: int) -> None:
         async with self._store._async_session_factory() as session:

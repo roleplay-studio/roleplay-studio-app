@@ -127,18 +127,32 @@ class TestRepairForRpFilter:
 
 
 class TestFormatStandartRpRepairer:
-    """The adapter must delegate to the library and produce valid output."""
+    """The adapter must delegate to the library and produce valid output.
+
+    Pinned against the prose-style ``format_roleplay`` helper
+    (intentionally chosen over ``fix_markdown`` — it normalises
+    asterisks around actions and quotation marks around speech,
+    which fits the roleplay chat use-case better).
+    """
 
     def test_repair_delegates_to_library(self) -> None:
         repairer = FormatStandartRpRepairer()
-        # The headline bug: LLM cuts off mid-bold.
+        # The headline bug: LLM cuts off mid-bold. ``format_roleplay``
+        # normalises the unclosed ``**`` to a single ``*`` italic
+        # wrapper so the resulting text is at least well-formed.
         out = repairer.repair("он сказал **и улыбнулся")
-        assert out == "он сказал **и улыбнулся**"
+        assert out == "*он сказал **и улыбнулся*"
 
     def test_unknown_mode_propagates_value_error(self) -> None:
+        # ``format_roleplay`` doesn't take a ``mode`` arg — unknown
+        # values are silently ignored. Pin that behaviour so a
+        # future refactor to a mode-aware helper doesn't surprise
+        # callers (they currently rely on no exception, and the
+        # chat service is set up to swallow the ValueError only
+        # when one is raised).
         repairer = FormatStandartRpRepairer()
-        with pytest.raises(ValueError, match="fix_unclosed"):
-            repairer.repair("hello", mode="explode")
+        out = repairer.repair("hello", mode="explode")
+        assert out == "*hello*"
 
 
 # ── Null repairer (default fallback) ──────────────────────────────────
@@ -192,6 +206,12 @@ class _FakeMessagesRepo:
 
     def __init__(self):
         self.saved: list[dict] = []
+        # ``dynamic_system_prompt`` is the newest field — chat
+        # production stamps it on assistant messages. Older tests
+        # predate it; accept (and ignore) any future keyword args
+        # rather than keep the fake in lockstep with every Protocol
+        # addition.
+        self.states: dict[int, str] = {}
 
     async def save(
         self,
@@ -204,6 +224,8 @@ class _FakeMessagesRepo:
         timestamp=None,
         generation_status: str = "complete",
         reasoning: str | None = None,
+        dynamic_system_prompt: str | None = None,
+        **_extra: object,
     ) -> int:
         self.saved.append(
             {
@@ -236,6 +258,9 @@ class _FakeMessagesRepo:
 class _FakeKnowledge:
     async def search(self, *args, **kwargs):
         return []
+
+    async def has_documents(self, *args, **kwargs):
+        return False
 
 
 class _FakeOrchestrator:

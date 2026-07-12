@@ -35,7 +35,11 @@ def constrain_image(
     w, h = img.size
     if w > max_dim or h > max_dim:
         ratio = max_dim / max(w, h)
-        img = img.resize((int(w * ratio), int(h * ratio)), Image.LANCZOS)
+        # Pillow 10+ exposes resampling filters via
+        # ``Image.Resampling``; ``Image.LANCZOS`` is kept for
+        # back-compat but the new name is what every type
+        # checker recognises.
+        img = img.resize((int(w * ratio), int(h * ratio)), Image.Resampling.LANCZOS)
 
     ext = str(dest_path).rsplit(".", 1)[-1].lower()
     save_kwargs: dict = {}
@@ -97,7 +101,7 @@ def resize_avatar(
             ratio = max_width / max(orig_w, orig_h)
             new_w = int(orig_w * ratio)
             new_h = int(orig_h * ratio)
-            resized = img.resize((new_w, new_h), Image.LANCZOS)
+            resized = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
 
         filename = f"{stem}{suffix}{ext}"
         out_path = dest_dir / filename

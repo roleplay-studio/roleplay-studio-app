@@ -276,6 +276,73 @@ async def test_service_restore_unknown_version_raises(store, bot_id):
 
 
 @pytest.mark.asyncio
+async def test_restore_old_snapshot_preserves_new_fields(store, bot_id):
+    """Restoring a snapshot that predates 0.0.4 must NOT silently
+    clear the bot's ``dynamic_system_prompt`` / ``world_state_prompt``
+    fields. The previous implementation passed
+    ``data.get("dynamic_system_prompt")`` to BotRepository.update,
+    which returned ``None`` for missing keys — BotRepository.update
+    treats ``None`` as "don't touch", but if any path interpreted it
+    as "set to None", the live field would be wiped on restore.
+
+    Verify: set non-empty prompts on the bot, restore a synthetic
+    pre-0.0.4 snapshot, confirm the prompts are unchanged.
+    """
+    version_repo = SqlAlchemyBotVersionRepository(store)
+    bot_repo = SqlAlchemyBotRepository(store)
+    svc = BotVersionService(version_repo, bot_repo)
+
+    # Manually seed an old-shape snapshot (no 0.0.4 keys).
+    old_version = BotVersion(
+        bot_id=bot_id,
+        version_number=1,
+        snapshot_json=json.dumps(
+            {
+                "name": "Old Name",
+                "personality": "Old persona",
+                "first_message": "Old greeting",
+                "scenario": "",
+                "description": "",
+                "avatar_path": None,
+                "categories": [],
+                "bot_type": "rp",
+                "alternate_greetings": [],
+                "mes_example": "",
+                # NOTE: no dynamic_system_prompt, no world_state_prompt.
+            }
+        ),
+        note="from 0.0.3",
+        source="manual",
+    )
+    old_version_id = await version_repo.add(old_version)
+
+    # Set non-empty post-0.0.4 fields on the live bot.
+    await bot_repo.update(
+        bot_id,
+        name="Current",
+        personality="Current",
+        first_message="Hi",
+        dynamic_system_prompt="stay in character",
+        world_state_prompt="emit yaml",
+    )
+
+    # Restore the old snapshot.
+    await svc.restore_version(old_version_id)
+
+    live = await bot_repo.get(bot_id)
+    assert live is not None
+    assert live.name == "Old Name"
+    # CRITICAL: the post-0.0.4 prompts must NOT be wiped to "" just
+    # because the snapshot lacks those keys.
+    assert live.dynamic_system_prompt == "stay in character", (
+        f"restore wiped dynamic_system_prompt: {live.dynamic_system_prompt!r}"
+    )
+    assert live.world_state_prompt == "emit yaml", (
+        f"restore wiped world_state_prompt: {live.world_state_prompt!r}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_service_delete_version(store, bot_id):
     version_repo = SqlAlchemyBotVersionRepository(store)
     bot_repo = SqlAlchemyBotRepository(store)
@@ -368,6 +435,9 @@ class _FakeBotRepo:
         bot_type="rp",
         alternate_greetings=None,
         mes_example: str | None = None,
+        dynamic_system_prompt: str | None = None,
+        world_state_prompt: str | None = None,
+        **_extra: object,
     ) -> None:
         bot = self._bots[bot_id]
         bot.name = name
@@ -377,14 +447,18 @@ class _FakeBotRepo:
         bot.description = description
         bot.avatar_path = avatar_path
         bot.categories = json.dumps(categories or [])
-        bot.bot_type = bot_type
+        bot.bot_type = bot_type if isinstance(bot_type, str) else bot_type.value
         bot.alternate_greetings = json.dumps(alternate_greetings or [])
         if mes_example is not None:
             bot.mes_example = mes_example
+        if dynamic_system_prompt is not None:
+            bot.dynamic_system_prompt = dynamic_system_prompt
+        if world_state_prompt is not None:
+            bot.world_state_prompt = world_state_prompt
+        self._bots[bot_id] = bot
 
     async def delete(self, bot_id: int) -> None:
         self._bots.pop(bot_id, None)
-
     async def get_with_thread_counts(self):
         return [(b, 0) for b in self._bots.values()]
 

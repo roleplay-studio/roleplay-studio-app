@@ -29,11 +29,11 @@ class HttpEmbeddings:
         """Return request headers.
 
         ``embedding_api_key`` is the *raw* value from the env (or
-        ``Settings(openrouter_api_key=..., embedding_api_key=None)``
+        ``Settings(llm_api_key=..., embedding_api_key=None)``
         in tests). HttpEmbeddings is intentionally dumb: it does NOT
-        fall back to ``openrouter_api_key`` on its own — that
+        fall back to ``llm_api_key`` on its own — that
         decision lives in the embedding bootstrap path, where an
-        unset embedding key means "use the openrouter key" but an
+        unset embedding key means "use the LLM key" but an
         explicit ``None`` means "no auth" (e.g. local Ollama).
         """
         headers: dict[str, str] = {
@@ -49,7 +49,7 @@ class HttpEmbeddings:
 
     def _get_base_url(self) -> str:
         # M13: ``effective_embedding_base_url`` falls back to the
-        # openrouter URL when ``EMBEDDING_BASE_URL`` is unset. The
+        # LLM URL when ``EMBEDDING_BASE_URL`` is unset. The
         # raw field may legitimately be ``None`` in that case.
         return self._settings.effective_embedding_base_url.rstrip("/")
 

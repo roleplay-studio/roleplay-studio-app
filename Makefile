@@ -24,8 +24,17 @@ NPM := npm
 help: ## Show this help message
 	@echo "Roleplay Studio — available targets:"
 	@echo ""
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
-	  awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}'
+	# Filter to lines that look like ``target: ## description`` and
+	# are NOT comments — header prose like "# Why a separate section:
+	# the e2e suite" used to leak into help output once the project
+	# grew past 30 targets.
+	#
+	# ``0-9`` MUST be in the char class — e2e-* targets contain a
+	# digit and were silently dropped by the original ``[a-zA-Z_-]+``
+	# regex. That bug shipped in phase 0 and survived every refactor
+	# because nobody actually scrolled through ``make help`` until
+	# the e2e section landed. Caught today, never again.
+	@awk '/^[a-zA-Z0-9_-]+:.*##/ && !/^#/ {split($$0, a, ":.*## "); printf "  \033[36m%-20s\033[0m %s\n", a[1], a[2]}' $(MAKEFILE_LIST)
 	@echo ""
 	@echo "Tip: most targets also have a :-backend / :-frontend variant."
 
@@ -56,12 +65,34 @@ dev: ## Run backend (prod mode) + Tauri desktop in one command
 	$(MAKE) dev-backend
 	$(MAKE) dev-tauri
 
+# `dev-debug` keeps the backend in the FOREGROUND so Python logger
+# output (structlog + uvicorn + our own loggers) streams straight to
+# the terminal. The previous design backgrounded the backend and
+# piped to ``logs/backend.log``, which was fine for a quick ``make
+# dev`` smoke test but made ``dev-debug`` useless for live error
+# triage — you'd have to alt-tab into another terminal and tail
+# the file. Now the tail is the terminal you're in.
+#
+# Tauri stays in the background because it opens a window and would
+# otherwise block this Make target from returning. If you need the
+# backend logs even *after* Tauri takes over the screen, run
+# ``make logs`` in another shell to follow the file.
 .PHONY: dev-debug
 dev-debug: export DEBUG := true
 dev-debug: export ENVIRONMENT := development
-dev-debug: ## Run backend with DEBUG=true + Tauri desktop
-	$(MAKE) dev
-	@echo "[dev-debug] backend has DEBUG=$(DEBUG) ENVIRONMENT=$(ENVIRONMENT) in its env"
+dev-debug: ## Run backend in FOREGROUND (DEBUG=true) + Tauri in background
+	$(MAKE) -j2 dev-backend-debug-fg dev-tauri
+
+# Foreground backend variant for ``dev-debug`` (live Python logger
+# output in the terminal). Unlike ``dev-backend`` it does not
+# background the process and does not write a pidfile — when you
+# Ctrl-C this make target, the backend dies with the make process
+# and you can rerun cleanly.
+.PHONY: dev-backend-debug-fg
+dev-backend-debug-fg: ## Start backend in foreground (live logs) — used by dev-debug
+	@mkdir -p logs
+	@echo "[backend] starting in foreground (DEBUG=$(DEBUG) ENVIRONMENT=$(ENVIRONMENT)) — Ctrl-C to stop"
+	@$(PY) backend/run_backend.py 2>&1 | tee logs/backend.log
 
 .PHONY: dev-tauri
 dev-tauri: ## Run Tauri desktop (assumes backend is already up)
@@ -73,34 +104,118 @@ dev-frontend: ## Run Vite dev server only (no Tauri, browser-only)
 
 # Start backend in the background. Writes PID to .backend.pid so
 # `make stop` can kill it cleanly. Logs go to logs/backend.log.
+#
+# DEBUG defaults ON — operators expect to see HTTP requests, SQL,
+# and LLM round-trips when they run a local dev backend. To get the
+# silent prod-style behaviour, run ``make dev-backend-quiet``.
+# Override any value with ``DEBUG=false make dev-backend`` etc.
 .PHONY: dev-backend
-dev-backend: ## Start backend in background, write logs to logs/backend.log
+dev-backend: export DEBUG ?= true
+dev-backend: export ENVIRONMENT ?= development
+dev-backend: export LOG_LEVEL ?= DEBUG
+dev-backend: ## Start backend in background (DEBUG on by default), write logs to logs/backend.log
 	@mkdir -p logs
 	@if [ -f .backend.pid ] && kill -0 $$(cat .backend.pid) 2>/dev/null; then \
-	  echo "[backend] already running (PID $$(cat .backend.pid))"; \
+	  echo "[backend] already running (PID $$(cat .backend.pid)) — DEBUG=$$DEBUG LOG_LEVEL=$$LOG_LEVEL"; \
 	else \
+	  echo "[backend] starting with DEBUG=$$DEBUG LOG_LEVEL=$$LOG_LEVEL ENVIRONMENT=$$ENVIRONMENT"; \
 	  $(PY) backend/run_backend.py > logs/backend.log 2>&1 & \
 	  echo $$! > .backend.pid; \
 	  echo "[backend] started (PID $$(cat .backend.pid)) — logs at logs/backend.log"; \
 	fi
 
+# Same as ``dev-backend`` but flips DEBUG off (matches what
+# ``make build`` / the Tauri-bundled binary will do at runtime).
+# Useful for verifying behaviour under prod-like settings without
+# rebuilding.
+.PHONY: dev-backend-quiet
+dev-backend-quiet: export DEBUG := false
+dev-backend-quiet: export LOG_LEVEL := INFO
+dev-backend-quiet: ## Start backend in background with DEBUG off (prod-like)
+	@mkdir -p logs
+	@if [ -f .backend.pid ] && kill -0 $$(cat .backend.pid) 2>/dev/null; then \
+	  echo "[backend] already running (PID $$(cat .backend.pid)) — DEBUG=$$DEBUG LOG_LEVEL=$$LOG_LEVEL"; \
+	else \
+	  echo "[backend] starting with DEBUG=$$DEBUG LOG_LEVEL=$$LOG_LEVEL ENVIRONMENT=$$ENVIRONMENT"; \
+	  $(PY) backend/run_backend.py > logs/backend.log 2>&1 & \
+	  echo $$! > .backend.pid; \
+	  echo "[backend] started (PID $$(cat .backend.pid)) — logs at logs/backend.log"; \
+	fi
+
+# Follow the live backend log without restarting the server. Useful
+# in a second terminal while ``make dev`` is running, or for
+# post-mortem after a crash.
+.PHONY: logs
+logs: ## Tail the backend log (Ctrl-C to stop following)
+	@if [ ! -f logs/backend.log ]; then \
+	  echo "[logs] no logs/backend.log yet — run \`make dev\` or \`make dev-debug\` first"; \
+	  exit 1; \
+	fi
+	@tail -n +1 -f logs/backend.log
+
+# Same as ``logs`` but only ERROR / WARNING lines — useful when
+# you want to spot-check for failures without scrolling through
+# the whole stream.
+.PHONY: logs-errors
+logs-errors: ## Tail only ERROR/WARNING lines from the backend log
+	@if [ ! -f logs/backend.log ]; then \
+	  echo "[logs] no logs/backend.log yet — run \`make dev\` or \`make dev-debug\` first"; \
+	  exit 1; \
+	fi
+	@tail -n +1 -f logs/backend.log | grep --line-buffered -E '"level":"(error|warning)"|ERROR|WARNING'
+
+# Filter the live backend log for HTTP / SQL / LLM traffic.
+# Operators care about three things when debugging:
+#   - HTTP method/path/status/duration   → _access_log_dispatch
+#   - SQL from SQLAlchemy + Alembic      → alembic.runtime + sqlalchemy.engine
+#   - LLM round-trips                    → llm / openai-like logger names
+# All three surface when ``LOG_LEVEL=DEBUG`` is set (dev-backend
+# default since e2e phase 0).
+.PHONY: logs-traffic
+logs-traffic: ## Tail HTTP requests + SQL + LLM calls from the backend log
+	@if [ ! -f logs/backend.log ]; then \
+	  echo "[logs-traffic] no logs/backend.log yet — run \`make dev-backend\` first"; \
+	  exit 1; \
+	fi
+	@tail -n +1 -f logs/backend.log | grep --line-buffered -E 'method=|alembic|sqlalchemy|llm|openai|chat_request|http'
+
 # Stop the background backend started by `make dev-backend`.
+#
+# Why we probe both .backend.pid AND the live port: a previous
+# teardown sometimes leaves an orphan process whose pid file
+# has been cleaned up but which is still bound to :55245. Killing
+# only via pidfile leaves it listening and breaks the next
+# `dev-backend`. The lsof step catches that case before we give
+# up.
+#
+# NB: do NOT auto-kill the lsof match — the process might be a
+# user's manually-started dev backend (see AGENTS.md / memory
+# PPID rule). We report it and let the operator decide.
 .PHONY: stop-backend
 stop-backend: ## Stop the background backend started by dev-backend
-	@if [ -f .backend.pid ]; then \
+	@KILLED=0; \
+	if [ -f .backend.pid ]; then \
 	  PID=$$(cat .backend.pid); \
 	  if kill -0 $$PID 2>/dev/null; then \
 	    kill $$PID && echo "[backend] stopped (PID $$PID)"; \
-	    rm -f .backend.pid; \
+	    KILLED=1; \
 	  else \
 	    echo "[backend] PID $$PID not running; cleaning pidfile"; \
-	    rm -f .backend.pid; \
 	  fi; \
-	else \
-	  echo "[backend] no pidfile; nothing to stop"; \
+	  rm -f .backend.pid; \
+	fi; \
+	if [ $$KILLED -eq 0 ]; then \
+	  STALE=$$(lsof -nP -i :55245 -t 2>/dev/null | head -1); \
+	  if [ -n "$$STALE" ]; then \
+	    echo "[backend] (warning) :55245 is held by PID $$STALE but no pidfile — left untouched"; \
+	    echo "[backend] (warning) if this is not your manual dev backend, run:"; \
+	    echo "[backend]   kill $$STALE"; \
+	  else \
+	    echo "[backend] no pidfile; nothing to stop"; \
+	  fi; \
 	fi
 
-# ─── Tests ─────────────────────────────────────────────────────────
+# ── Tests ─────────────────────────────────────────────────────
 
 .PHONY: test
 test: ## Run all tests (backend + frontend)
@@ -114,6 +229,108 @@ test-backend: ## Run backend pytest suite
 .PHONY: test-frontend
 test-frontend: ## Run frontend vitest suite
 	cd frontend && $(NPM) run test
+
+# ─── E2E (Playwright, real backend + real Vite) ─────────────────
+#
+# Why a separate section: the e2e suite
+#   - talks to a real FastAPI on 127.0.0.1:55245 (not mocks)
+#   - drives a real Vite dev server on 127.0.0.1:5173
+#   - costs real LLM tokens when a chat test fires
+#
+# The backend fixture (frontend/e2e/fixtures/backend.ts) assumes
+# the backend is already up. ``e2e-backend`` brings it up via
+# ``make dev-backend`` (which writes .backend.pid); ``e2e``
+# chains them together, and ``e2e-smoke`` chains ``e2e-smoke-only``
+# for the @smoke slice.
+
+.PHONY: e2e-backend
+e2e-backend: ## Start the FastAPI backend that the e2e suite talks to
+	$(MAKE) dev-backend LLM_PROVIDER=$${LLM_PROVIDER:-mock}
+	@echo "[e2e] waiting for backend on :55245 (LLM_PROVIDER=$${LLM_PROVIDER:-mock}) ..."
+	@for i in $$(seq 1 30); do \
+	  if curl -fsS http://127.0.0.1:55245/api/health >/dev/null 2>&1; then \
+	    echo "[e2e] backend ready"; exit 0; \
+	  fi; \
+	  sleep 1; \
+	done; \
+	echo "[e2e] backend did not become ready in 30 s" >&2; \
+	exit 1
+
+.PHONY: e2e-frontend-up
+e2e-frontend-up: ## Start the Vite dev server the e2e suite drives
+	@if ! curl -fsS http://127.0.0.1:5173/ >/dev/null 2>&1; then \
+	  echo "[e2e] starting Vite on :5173 (one-shot, logs at frontend/e2e-vite.log)"; \
+	  cd frontend && $(NPM) run dev -- --host 127.0.0.1 --port 5173 --strictPort \
+	    > e2e-vite.log 2>&1 & \
+	  echo $$! > ../.vite.pid; \
+	  for i in $$(seq 1 30); do \
+	    if curl -fsS http://127.0.0.1:5173/ >/dev/null 2>&1; then \
+	      echo "[e2e] Vite ready"; exit 0; \
+	    fi; \
+	    sleep 1; \
+	  done; \
+	  echo "[e2e] Vite did not become ready in 30 s" >&2; \
+	  exit 1; \
+	else \
+	  echo "[e2e] Vite already running on :5173"; \
+	fi
+
+.PHONY: e2e-frontend-down
+e2e-frontend-down: ## Stop the Vite dev server started by e2e-frontend-up
+	@if [ -f .vite.pid ]; then \
+	  PID=$$(cat .vite.pid); \
+	  if kill -0 $$PID 2>/dev/null; then \
+	    kill $$PID && echo "[e2e] Vite stopped (PID $$PID)"; \
+	    rm -f .vite.pid; \
+	  else \
+	    echo "[e2e] Vite PID $$PID not running; cleaning pidfile"; \
+	    rm -f .vite.pid; \
+	  fi; \
+	else \
+	  echo "[e2e] no .vite.pid; nothing to stop"; \
+	fi
+
+.PHONY: e2e-stack-up
+e2e-stack-up: e2e-backend e2e-frontend-up ## Bring up backend + Vite for e2e
+
+.PHONY: e2e-stack-down
+e2e-stack-down: stop-backend e2e-frontend-down ## Tear down backend + Vite
+
+.PHONY: e2e-install
+e2e-install: ## Install Playwright browsers (chromium only)
+	cd frontend && $(NPM) run e2e:install-browsers
+
+.PHONY: e2e-smoke
+e2e-smoke: ## Run only @smoke tests (~30 s, smoke coverage of the 5 critical journeys)
+	$(MAKE) e2e-stack-up
+	cd frontend && $(NPM) run e2e -- --grep '@smoke'
+	E2E_EXIT=$$?; \
+	$(MAKE) -s e2e-stack-down || true; \
+	exit $$E2E_EXIT
+
+.PHONY: e2e
+e2e: ## Run full Playwright E2E suite (mock LLM by default — set LLM_PROVIDER=openrouter for real)
+	$(MAKE) e2e-stack-up
+	cd frontend && $(NPM) run e2e
+	E2E_EXIT=$$?; \
+	$(MAKE) -s e2e-stack-down || true; \
+	exit $$E2E_EXIT
+
+.PHONY: e2e-real-llm
+e2e-real-llm: ## Like ``e2e`` but drives the real OpenRouter LLM (set LLM_API_KEY in env)
+	LLM_PROVIDER=openrouter $(MAKE) e2e-stack-up
+	cd frontend && $(NPM) run e2e
+	E2E_EXIT=$$?; \
+	$(MAKE) -s e2e-stack-down || true; \
+	exit $$E2E_EXIT
+
+.PHONY: e2e-headed
+e2e-headed: ## Run e2e with a visible browser window
+	$(MAKE) e2e-stack-up
+	cd frontend && $(NPM) run e2e:headed
+	E2E_EXIT=$$?; \
+	$(MAKE) -s e2e-stack-down || true; \
+	exit $$E2E_EXIT
 
 # ─── Lint / Format / Type-check ────────────────────────────────────
 
@@ -185,6 +402,105 @@ build-frontend: ## Build frontend (Vite)
 .PHONY: build-backend
 build-backend: ## Build backend binary (PyInstaller)
 	$(PY) -m PyInstaller backend/run_backend.spec
+
+# ─── Docker ────────────────────────────────────────────────────────
+#
+# Dev stack in two containers (backend + Vite frontend). Hot-reload
+# via bind mounts; persistent state in the `roleplay_data` named
+# volume.
+#
+# Common workflows:
+#   make docker-up           # build + start, logs to terminal
+#   make docker-up-d         # start in background (same as
+#                            # `docker compose up -d`)
+#   make docker-down         # stop + remove containers (keeps
+#                            # data volume)
+#   make docker-clean        # also remove the data volume
+#                            # (nuclear — wipes .env, db, chroma)
+#   make docker-logs         # tail both services
+#   make docker-logs-backend # tail one service
+#   make docker-shell-backend
+#                            # interactive shell in backend
+#   make docker-test         # run pytest in clean container
+#   make docker-test-shell   # pytest with a shell first (debug)
+#   make docker-restart-backend
+#                            # restart only the backend after a
+#                            # code change (compose bind-mount
+#                            # doesn't autoreload Python).
+
+# Compose is a thin wrapper over docker compose. We always invoke
+# it with the project root as workdir so the bind mounts work
+# even when make is invoked from a subdirectory.
+COMPOSE := docker compose
+COMPOSE_TEST := docker compose -f docker-compose.yml -f docker-compose.test.yml
+
+.PHONY: docker-up
+docker-up: ## Build images and start the dev stack in foreground
+	$(COMPOSE) up --build
+
+.PHONY: docker-up-d
+docker-up-d: ## Start the dev stack in background (logs via docker-logs)
+	$(COMPOSE) up -d --build
+
+.PHONY: docker-down
+docker-down: ## Stop and remove containers (keeps the data volume)
+	$(COMPOSE) down
+
+.PHONY: docker-clean
+docker-clean: ## Stop containers AND wipe the persistent data volume
+	$(COMPOSE) down -v
+
+.PHONY: docker-logs
+docker-logs: ## Tail logs from both services (Ctrl-C to stop)
+	$(COMPOSE) logs -f
+
+.PHONY: docker-logs-backend
+docker-logs-backend: ## Tail only the backend service
+	$(COMPOSE) logs -f backend
+
+.PHONY: docker-logs-frontend
+docker-logs-frontend: ## Tail only the frontend service
+	$(COMPOSE) logs -f frontend
+
+.PHONY: docker-ps
+docker-ps: ## Show running containers + health status
+	$(COMPOSE) ps
+
+.PHONY: docker-restart-backend
+docker-restart-backend: ## Restart only the backend (after Python code changes)
+	$(COMPOSE) restart backend
+
+.PHONY: docker-restart-frontend
+docker-restart-frontend: ## Restart only the frontend (rare — Vite HMR handles most edits)
+	$(COMPOSE) restart frontend
+
+.PHONY: docker-shell-backend
+docker-shell-backend: ## Open an interactive shell in the backend container
+	$(COMPOSE) exec backend bash
+
+.PHONY: docker-shell-frontend
+docker-shell-frontend: ## Open an interactive shell in the frontend container
+	$(COMPOSE) exec frontend sh
+
+.PHONY: docker-test
+docker-test: ## Run pytest inside the test compose override
+	$(COMPOSE_TEST) run --rm backend pytest
+
+.PHONY: docker-test-shell
+docker-test-shell: ## Drop into a shell in the test compose (debug fixtures interactively)
+	$(COMPOSE_TEST) run --rm backend bash
+
+.PHONY: docker-ruff
+docker-ruff: ## Run ruff check inside the backend container
+	$(COMPOSE_TEST) run --rm backend ruff check .
+
+.PHONY: docker-frontend-lint
+docker-frontend-lint: ## Run frontend eslint inside its container
+	$(COMPOSE) exec frontend npm run lint
+
+.PHONY: docker-frontend-test
+docker-frontend-test: ## Run frontend vitest inside its container
+	$(COMPOSE) exec frontend npm run test
 
 # ─── Clean ─────────────────────────────────────────────────────────
 

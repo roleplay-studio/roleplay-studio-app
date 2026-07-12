@@ -207,6 +207,8 @@ async def update_bot(bot_id: int, body: UpdateBotRequest, container: ContainerDe
             bot_type=body.bot_type,
             alternate_greetings=body.alternate_greetings,
             mes_example=body.mes_example or "",
+            dynamic_system_prompt=body.dynamic_system_prompt,
+            world_state_prompt=body.world_state_prompt,
         )
         await container.bots.update_bot(command)
         return {"ok": True}
@@ -432,6 +434,8 @@ async def _import_from_json(content: bytes, container: ContainerDep) -> dict:
         bot_type=body.bot_type,
         alternate_greetings=getattr(body, "alternate_greetings", []) or [],
         mes_example=getattr(body, "mes_example", "") or "",
+        dynamic_system_prompt=getattr(body, "dynamic_system_prompt", "") or "",
+        world_state_prompt=getattr(body, "world_state_prompt", "") or "",
     )
     bot_id = await container.bots.create_bot(command)
 

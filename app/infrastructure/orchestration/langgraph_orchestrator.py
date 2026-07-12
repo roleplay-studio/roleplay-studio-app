@@ -227,16 +227,25 @@ class LangGraphConversationOrchestrator:
         # the LLM port will dispatch to. Production callers ignore
         # this chunk; the SSE route only forwards it when
         # ``Settings.debug_enabled`` is true.
-        yield LLMChunk(
-            content="",
-            debug_messages=[
-                {
-                    "role": m["role"],
-                    "content": m["content"],
-                }
-                for m in messages
-            ],
-        )
+        #
+        # m-debug-skip: only build the payload when debug mode is on.
+        # The construction walks the full message list (system + history
+        # + RAG + user turn + floating reminders) and on a 200-message
+        # thread that's tens of KB — wasted work on every chat turn in
+        # production. Yielding a chunk with ``debug_messages=None``
+        # is the no-op path; ChatService's debug-gate at the chunk
+        # boundary already ignores ``None``.
+        if self._settings.debug_enabled:
+            yield LLMChunk(
+                content="",
+                debug_messages=tuple(
+                    {
+                        "role": m["role"],
+                        "content": m["content"],
+                    }
+                    for m in messages
+                ),
+            )
         async for chunk in self._llm.generate_response_stream(
             messages,
             temperature=request.temperature,
@@ -347,9 +356,55 @@ class LangGraphConversationOrchestrator:
         return {**state, "messages": messages}
 
     def _node_user_input(self, state: OrchestratorState) -> OrchestratorState:
-        """Append current user input as the final message."""
+        """Append current user input as the final message.
+
+        Three optional system messages can land between the
+        pre-existing bot system message and the new user turn,
+        in this order:
+
+        1. ``[Reminder] <dynamic_system_prompt>`` — fires when the
+           bot has a non-empty ``dynamic_system_prompt``. This
+           closes the loop on instruction drift in long chats
+           where the bot stops following its personality after
+           100+ messages. The ``[Reminder]`` prefix is intentional
+           — it gives the LLM an unambiguous cue that this is a
+           meta-instruction, not a story turn. Without the prefix,
+           reasoning-capable models sometimes treat the
+           meta-instruction as the next dialogue beat and reply to
+           it.
+
+        2. ``[World state from previous turn] <prev_world_state>`` —
+           fires when ``prev_world_state`` is non-empty (i.e. the
+           previous assistant turn in this thread has a stored
+           snapshot). Comes immediately after the reminder so the
+           LLM sees "reminder → world context → user turn" as a
+           single bundle. The ``[World state from previous turn]``
+           prefix is a stable marker — the bot author formats the
+           contents however they like (YAML, JSON, prose) and the
+           prefix makes it clear to the LLM that the block is
+           authoritative context, not new dialogue.
+
+        3. The user turn itself, last.
+        """
         request = state["request"]
         messages = list(state["messages"])
+        if request.dynamic_system_prompt.strip():
+            substituted = self._variable_replace(
+                request.dynamic_system_prompt.strip(), request
+            )
+            messages.append(
+                {"role": "system", "content": f"[Reminder] {substituted}"}
+            )
+        if request.prev_world_state.strip():
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        f"[World state from previous turn] "
+                        f"{request.prev_world_state}"
+                    ),
+                }
+            )
         messages.append({"role": "user", "content": request.user_input})
         return {**state, "messages": messages}
 
@@ -476,6 +531,18 @@ class LangGraphConversationOrchestrator:
 
         Used by generate_stream() which needs direct access to the message
         list for streaming, not the graph's invoke path.
+
+        Mirrors ``_node_user_input`` exactly: prepends ``[Reminder] <DSP>``
+        and ``[World state from previous turn] <state>`` between the
+        system prompt and the user turn when those fields are non-empty.
+        Without this duplication the streaming path silently drops both
+        per-turn injections — the dev-mode modal showed no reminder
+        block, and the world-state context never reached the LLM during
+        streaming. (The graph path through ``_node_user_input`` is the
+        source of truth; this is a manual copy. Tests in
+        ``test_floating_prompt.py`` catch the round-trip via
+        ``_node_user_input`` but the streaming path bypasses the graph
+        entirely.)
         """
         bot_type = self._normalize_bot_type(request.bot_type)
         messages: list[dict[str, str]] = []
@@ -541,6 +608,28 @@ class LangGraphConversationOrchestrator:
             file_msg = self._build_files_message(request)
             if file_msg:
                 messages.append(file_msg)
+
+        # Per-turn injections (mirror of _node_user_input — must stay in sync).
+        # Order matches the graph path exactly so the LLM sees the same
+        # prompt shape whether we go through ``generate`` (graph) or
+        # ``generate_stream`` (this builder).
+        if request.dynamic_system_prompt.strip():
+            substituted = self._variable_replace(
+                request.dynamic_system_prompt.strip(), request
+            )
+            messages.append(
+                {"role": "system", "content": f"[Reminder] {substituted}"}
+            )
+        if request.prev_world_state.strip():
+            messages.append(
+                {
+                    "role": "system",
+                    "content": (
+                        f"[World state from previous turn] "
+                        f"{request.prev_world_state}"
+                    ),
+                }
+            )
 
         # User input
         messages.append({"role": "user", "content": request.user_input})

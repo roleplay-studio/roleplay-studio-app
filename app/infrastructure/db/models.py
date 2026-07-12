@@ -29,6 +29,15 @@ class Bot(SQLModel, table=True):
     bot_type: str = Field(default="rp")  # stored as string, converted to BotType in API layer
     alternate_greetings: str = Field(default="[]")  # JSON list of strings
     mes_example: str = Field(default="")  # V1/V2/V3 few-shot dialogue examples
+    # Floating system reminder injected right before the last user turn
+    # on every chat request. Solves instruction drift in long chats.
+    # See ``docs/superpowers/plans/2026-07-08-bot-floating-prompts-and-world-state.md``
+    # for the architecture.
+    dynamic_system_prompt: str = Field(default="")
+    # System prompt for the background task that updates
+    # ``Conversation.state``. The bot developer owns the output format
+    # via this prompt (YAML, JSON, prose, custom — anything).
+    world_state_prompt: str = Field(default="")
 
     threads: list["ChatThread"] = Relationship(
         back_populates="bot", sa_relationship_kwargs={"cascade": "all, delete-orphan"}
@@ -107,6 +116,22 @@ class Conversation(SQLModel, table=True):
     # without re-parsing. ``None`` for messages where the model didn't
     # emit reasoning (most providers, all non-reasoning models).
     reasoning: str | None = Field(default=None, nullable=True)
+    # Per-message world-state snapshot (opaque string — bot author
+    # chooses the format via ``Bot.world_state_prompt``). Populated
+    # by the background state-update task after each assistant
+    # response; ``None`` for older messages that predate the feature
+    # and for messages where the bot has no ``world_state_prompt``.
+    state: str | None = Field(default=None, nullable=True)
+    # Floating system-prompt snapshot for the turn that produced this
+    # message. Captured at stream time so the chat UI can show what
+    # was actually sent to the LLM (``[Reminder] ...`` block). The
+    # field is set on assistant messages only when the bot has a
+    # non-empty ``Bot.dynamic_system_prompt``; empty string = no
+    # floating prompt was sent (the panel simply doesn't render).
+    # Added in the f1e2d3c4b5a6 migration — the original 0.0.4
+    # code passed this through the repo but never persisted it, so
+    # the dev-mode panel was always empty.
+    dynamic_system_prompt: str = Field(default="", nullable=False)
     short_content: str | None = Field(
         default=None, nullable=True
     )  # краткая суммаризация этого сообщения

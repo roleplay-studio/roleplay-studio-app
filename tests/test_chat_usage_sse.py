@@ -80,6 +80,9 @@ class _FakeKnowledgeRepo:
     async def search(self, *args, **kwargs):
         return []
 
+    async def has_documents(self, *args, **kwargs):
+        return False
+
 
 class _StreamingLLM:
     """LLM stub that yields a fixed sequence of LLMChunks.

@@ -125,6 +125,9 @@ class _KnowledgeStub:
     async def search(self, *args, **kwargs):
         return []
 
+    async def has_documents(self, *args, **kwargs):
+        return False
+
 
 class _StubOrchestrator:
     """Yields one chunk and finishes — enough to drive the regen path."""

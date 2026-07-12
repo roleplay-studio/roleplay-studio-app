@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from api.deps import ContainerDep
 from api.schemas import EditMessageRequest
-from app.application.dto import MessageDTO, RecentThreadDTO, ThreadDTO
+from app.application.dto import MessageDTO, RecentThreadDTO, ThreadDTO, ThreadStatsDTO
 from app.application.exceptions import NotFoundError
 
 router = APIRouter()
@@ -116,6 +116,21 @@ async def list_messages(
     return await container.threads.list_messages(thread_id, limit, before_id=before_id)
 
 
+@router.get("/{thread_id}/stats", response_model=ThreadStatsDTO)
+async def get_thread_stats(thread_id: int, container: ContainerDep):
+    """Header-level stats (real message total + token estimate).
+
+    Complements the paginated ``GET /threads/{id}/messages`` so the
+    chat header can render the true size of the thread instead of just
+    the latest 50-message window. The token estimate mirrors the
+    frontend's chars/4 proxy so the two stay in lockstep.
+    """
+    try:
+        return await container.threads.get_stats(thread_id)
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+
+
 @router.put("/{thread_id}/messages/{message_id}")
 async def update_message(
     thread_id: int,
@@ -124,7 +139,9 @@ async def update_message(
     container: ContainerDep,
 ):
     try:
-        new_id = await container.threads.update_message(thread_id, message_id, body.content)
+        new_id = await container.threads.update_message(
+            thread_id, message_id, body.content, state=body.state
+        )
         return {"ok": True, "message_id": new_id}
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))

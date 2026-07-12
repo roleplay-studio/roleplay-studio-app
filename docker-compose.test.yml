@@ -1,0 +1,82 @@
+# ──────────────────────────────────────────────────────────────────
+#  Roleplay Studio — TEST compose override
+#
+#  Use this when you want to run the backend test suite inside a
+#  clean container without affecting the dev data volume. Mounts
+#  the source read-write so tests can write to a tmp sqlite, runs
+#  pytest in the foreground, and exits with the test's exit code.
+#
+#  Usage:
+#    docker compose -f docker-compose.yml -f docker-compose.test.yml \
+#      run --rm backend pytest -x
+#    docker compose -f docker-compose.yml -f docker-compose.test.yml \
+#      run --rm backend pytest tests/test_chat.py -k streaming
+#
+#  Notes:
+#    - The frontend service is intentionally NOT started here.
+#    - The data volume is replaced by a tmpfs so tests can't leak
+#      state into the dev volume.
+#    - Source mounts are read-WRITE here (no `:ro`) because some
+#      tests write conftest fixtures or tmp sqlite files alongside
+#      the test module. The tmpfs is small and lives only for the
+#      container's lifetime.
+# ──────────────────────────────────────────────────────────────────
+
+services:
+  backend:
+    # Override the dev command so compose `run` defaults to a
+    # shell rather than blocking the terminal with the API.
+    #
+    # entrypoint runs before command and unsets the dev-mode
+    # vars (DEBUG / ENVIRONMENT / LOG_LEVEL) that the base
+    # compose injects. Compose merges ``environment:``
+    # additively and can't "unset" a variable, so the only
+    # reliable scrub is at exec time. The shim lives at
+    # /usr/local/bin/pytest-clean-env and is baked into the
+    # image at build time (see Dockerfile.backend).
+    entrypoint: ["/usr/local/bin/pytest-clean-env"]
+    command: ["sleep", "infinity"]
+    environment:
+      # Only the env vars the tests actually need. Anything
+      # the base compose injects is scrubbed by the entrypoint
+      # shim before pytest starts.
+      VIRTUAL_ENV: /app/.venv
+      # ROLEPLAY_DATA_DIR points .env / db / chroma writes at the
+      # tmpfs below. Tests typically use :memory: sqlite but the
+      # few that touch disk (alembic round-trip) need a writable
+      # dir.
+      ROLEPLAY_DATA_DIR: /data
+    volumes:
+      # Re-mount source read-write for tests (the base compose is
+      # read-only).
+      - ./api:/app/api
+      - ./app:/app/app
+      - ./backend:/app/backend
+      - ./scenarios:/app/scenarios
+      - ./engine:/app/engine
+      - ./schemas:/app/schemas
+      - ./scripts:/app/scripts
+      - ./tests:/app/tests
+      # tests/test_connect_i18n.py reads frontend/src/lib/i18n.ts
+      # to verify the English/Russian key sets are in sync. The
+      # base compose bind-mounts the whole frontend/src tree, but
+      # the test override starts without a frontend service, so
+      # we have to mount it here too. Read-write matches the
+      # backend source above; the test never writes to it.
+      - ./frontend/src:/app/frontend/src:rw
+      # Alembic config — needed by init_db() on the very first
+      # startup that creates the SQLite file.
+      - ./alembic.ini:/app/alembic.ini
+      - ./alembic:/app/alembic
+      - ./pyproject.toml:/app/pyproject.toml
+      - ./uv.lock:/app/uv.lock
+      # Throwaway data dir — wiped with the container.
+      - type: tmpfs
+        target: /data
+        tmpfs:
+          size: 256m
+    # No ports mapping for tests — pytest talks to in-process
+    # app via httpx.AsyncClient.
+
+  # Frontend is omitted: pytest only needs the backend, and
+  # starting Vite just to run backend tests would slow CI down.

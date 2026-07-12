@@ -1,5 +1,6 @@
 """Composition root for presentation adapters."""
 
+import logging
 from functools import lru_cache
 
 from app.application.container import ApplicationContainer
@@ -20,6 +21,7 @@ from app.application.services import (
 from app.infrastructure.config import Settings
 from app.infrastructure.format_standart_rp_repairer import FormatStandartRpRepairer
 from app.infrastructure.llm import OpenRouterLLM
+from app.infrastructure.llm_mock import MockLLM
 from app.infrastructure.orchestration.langgraph_orchestrator import (
     LangGraphConversationOrchestrator,
 )
@@ -35,6 +37,8 @@ from app.infrastructure.repositories.sqlalchemy import (
     SqlAlchemyThreadRepository,
 )
 from app.infrastructure.vectorstore import AsyncChromaKnowledgeBase, ChromaKnowledgeBase
+
+logger = logging.getLogger(__name__)
 
 
 def build_container(settings: Settings | None = None) -> ApplicationContainer:
@@ -62,9 +66,22 @@ def build_container(settings: Settings | None = None) -> ApplicationContainer:
     # ``startup_llms(container)`` and ``shutdown_llms(container)`` so the
     # sockets have a clean owner and an explicit close. This replaces
     # the previous ``__del__``-based cleanup (K2 in docs/review.md).
+    #
+    # M16: ``Settings.llm_provider`` selects the implementation.
+    # ``"openrouter"`` (default) drives the real provider over HTTPS;
+    # ``"mock"`` swaps in ``MockLLM`` for E2E / CI where hitting a
+    # remote LLM is too expensive (rate-limit + cost) for a test suite
+    # that only cares about the wire shape, not the prose. Both paths
+    # share the same ``startup()`` / ``close()`` / ``generate_response*``
+    # contract so downstream services need no branching.
     try:
-        llm = OpenRouterLLM(settings=settings)
-        fast_llm = OpenRouterLLM(settings=settings, model=settings.fast_model)
+        if settings.llm_provider == "mock":
+            logger.info("LLM provider: mock (deterministic simulator)")
+            llm = MockLLM(settings=settings)
+            fast_llm = MockLLM(settings=settings, model=settings.fast_model)
+        else:
+            llm = OpenRouterLLM(settings=settings)
+            fast_llm = OpenRouterLLM(settings=settings, model=settings.fast_model)
     except (ConfigurationError, Exception):
         llm = None
         fast_llm = None

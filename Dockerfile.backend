@@ -1,0 +1,121 @@
+# ──────────────────────────────────────────────────────────────────
+#  Roleplay Studio — backend image
+#  Dev-oriented image: code is mounted as a volume at runtime so
+#  edits show up on the next reload without rebuilding the image.
+#  For a prod-style image (no mount, baked-in code) see the
+#  `backend:build` target in the Makefile.
+# ──────────────────────────────────────────────────────────────────
+
+# Pin a slim Python image. uv ships its own Python so we only need
+# the base for system libraries (sqlite, openssl for httpx, etc.).
+FROM python:3.13-slim AS base
+
+# uv — single binary, fastest Python package manager. Installed
+# via the official installer rather than pip so the lockfile
+# stays authoritative (no second resolver running alongside uv).
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/app/.venv \
+    UV_COMPILE_BYTECODE=1 \
+    # VIRTUAL_ENV is read by several scripts/tests (e.g.
+    # test_print_qr.py derives the venv's python from it). uv
+    # honours this env to locate the venv without callers
+    # hard-coding /app/.venv.
+    VIRTUAL_ENV=/app/.venv \
+    PATH="/app/.venv/bin:$PATH"
+
+# Install uv + system deps in one layer.
+# build-essential + libpq-dev are pulled in for wheels that don't
+# ship pre-built for the slim image (greenlet, aiosqlite).
+#
+# git is required because two deps in pyproject.toml
+# (character-card, format-standart-rp) come from git URLs
+# declared under [tool.uv.sources]. uv shells out to git to
+# resolve them — without it `uv sync` fails with
+# "Git executable not found".
+#
+# We clean apt lists in the same RUN to keep the layer small.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        build-essential \
+        curl \
+        ca-certificates \
+        git \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && mv /root/.local/bin/uv /usr/local/bin/uv \
+    && uv --version
+
+WORKDIR /app
+
+# Copy ONLY the files uv needs to resolve deps. The full source
+# tree is mounted at runtime, so we don't COPY . here — that
+# would defeat the bind mount.
+#
+# Why we still copy pyproject.toml/uv.lock: uv sync uses them as
+# the lockfile source. If we only bind-mount the source, uv sync
+# would see no pyproject and skip. After this COPY the lockfile is
+# cached in the image layer; even if the host lockfile changes the
+# cached one is used unless we rebuild with --no-cache.
+COPY pyproject.toml uv.lock ./
+
+# Install deps into /app/.venv. --frozen ensures uv.lock wins.
+# --no-install-project skips installing the local package itself
+# — we run `pip install -e .` separately only when needed (test
+# stack). For dev runs the editable mount + PYTHONPATH works.
+#
+# Note: two of the deps (character-card, format-standart-rp) come
+# from git URLs declared under [tool.uv.sources]. uv handles these
+# natively — no extra git setup needed.
+RUN uv sync --frozen --no-install-project --extra test
+
+# Install the project itself in editable mode so ``importlib.metadata``
+# can resolve its version (``Settings.version`` reads it). Without
+# this every health probe returns ``0.0.0+unknown`` and tests that
+# assert ``version == "0.1.0"`` fail.
+#
+# ``uv pip install -e .`` (rather than ``uv sync`` without
+# ``--no-install-project``) is intentional: uv's default behaviour
+# is to keep the .venv in sync with pyproject, but we want to
+# control exactly *which* extras land in the image (test only,
+# not dev/bench). Editing here keeps the lockfile authoritative
+# for runtime deps while letting us layer the local package on top.
+RUN uv pip install --python /app/.venv/bin/python -e .
+
+# Copy a small entrypoint shim. Real entrypoint is the mounted
+# `backend/run_backend.py`, but having the image self-bootable is
+# useful for `docker run --rm` smoke tests.
+COPY backend/run_backend.py /app/backend/run_backend.py
+
+# Bake alembic.ini + alembic/ into the image so the backend can
+# self-start (e.g. ``docker run --rm roleplay-studio-backend``
+# without compose). In compose these are bind-mounted from the
+# host, which overrides the COPY'd version — same destination,
+# same content, no conflict.
+#
+# Why this matters: init_db() looks for ``/app/alembic.ini``
+# during FastAPI's lifespan. Without it the first request fails
+# with ``RuntimeError: alembic.ini not found at /app/alembic.ini``.
+COPY alembic.ini /app/alembic.ini
+COPY alembic /app/alembic
+
+# Test-only helper: docker-compose.test.yml uses this entrypoint
+# shim to strip the dev-mode DEBUG/ENVIRONMENT/LOG_LEVEL vars
+# before exec'ing pytest. Keep it inside the image so the test
+# override doesn't need to mount the scripts/ directory just for
+# the entrypoint.
+COPY scripts/pytest-clean-env.sh /usr/local/bin/pytest-clean-env
+RUN chmod +x /usr/local/bin/pytest-clean-env
+
+# Hypercorn defaults to 127.0.0.1:55245 in run_backend.py.
+# Inside a container that's unreachable from the host, so we
+# override via env in docker-compose. EXPOSE is documentation
+# only — docker-compose ports: still controls the mapping.
+EXPOSE 55245
+
+# Default command runs the API. Override in compose to run tests
+# or drop into a shell.
+CMD ["python", "/app/backend/run_backend.py"]

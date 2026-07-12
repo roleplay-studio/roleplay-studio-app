@@ -62,7 +62,7 @@ class ChromaKnowledgeBase:
         raw_key = self.settings.embedding_api_key
         key_str = raw_key.get_secret_value() if raw_key is not None else ""
         key_hash = hashlib.sha256(key_str.encode()).hexdigest()[:16]
-        # M13: use the effective URL (with openrouter fallback) so the
+        # M13: use the effective URL (with LLM fallback) so the
         # fingerprint matches the URL the embedding client actually
         # hits.
         raw = (
@@ -167,6 +167,14 @@ class ChromaKnowledgeBase:
     def search(self, bot_id: int, query: str, top_k: int = 15) -> list[str]:
         if not self.embedding_enabled:
             return []
+        if not self._has_documents(bot_id):
+            # Empty collection — there's nothing to search against.
+            # Skip ``_get_vectorstore`` and ``similarity_search`` here
+            # so we don't bill the embedding model for a query
+            # vector that will land on zero documents. This is the
+            # 0.0.5 fix for "RP bots without a knowledge base
+            # burning an embedding call on every user message".
+            return []
         if bot_id in self._stale_bots:
             return []  # Degraded mode: don't return semantically-broken results
         vectorstore = self._get_vectorstore(bot_id)
@@ -178,13 +186,16 @@ class ChromaKnowledgeBase:
         self, bot_id: int, query: str, top_k: int = 15
     ) -> list[tuple[str, float]]:
         """Search and return (content, relevance_score) pairs, unfiltered.
-        Used by the test-search UI to show raw similarity scores."""
+        Used by the test-search UI to show raw similarity scores.
+        """
         if not self.embedding_enabled:
+            return []
+        if not self._has_documents(bot_id):
+            # Same skip as ``search`` — see comment there.
             return []
         vectorstore = self._get_vectorstore(bot_id)
         results = vectorstore.similarity_search_with_score(query=query, k=top_k)
         return [(doc.page_content, round(self._l2sq_to_score(dist), 4)) for doc, dist in results]
-
     @staticmethod
     def _l2sq_to_score(dist: float) -> float:
         """Convert Chroma's squared-L2 distance to a cosine-similarity score in [0, 1].
@@ -218,6 +229,38 @@ class ChromaKnowledgeBase:
                 )
             )
         return entries
+
+    def _has_documents(self, bot_id: int) -> bool:
+        """Return True if the bot's collection has at least one entry.
+
+        Used by ``search`` / ``search_with_scores`` to short-circuit
+        before calling the embedding model — for a bot with an
+        empty knowledge base, the similarity search would compute a
+        query vector against zero documents and return ``[]``
+        anyway, but the embedding model call has real cost (per
+        API pricing and per ms latency) and a flat empty result is
+        the only outcome.
+
+        Implementation note: ``vectorstore.get()`` reads metadata
+        only — it does **not** invoke the embedding function. So
+        this is cheap, and safe to call on the hot path of every
+        chat turn.
+        """
+        if not self.embedding_enabled:
+            return False
+        if not self._initialized.get(bot_id):
+            return False
+        try:
+            vectorstore = self._get_vectorstore(bot_id)
+            # ``include=[]`` (no embeddings, no docs) still gives us
+            # ``ids`` — the cheapest possible count.
+            ids = vectorstore.get(include=[]).get("ids", []) or []
+            return len(ids) > 0
+        except Exception:
+            # If the collection doesn't exist yet or the metadata
+            # read fails, treat as empty so the search short-circuits
+            # rather than crashing the chat request.
+            return False
 
     def update(self, bot_id: int, entry_id: str, content: str) -> None:
         """Update a knowledge entry by re-embedding with new content."""
@@ -372,8 +415,25 @@ class AsyncChromaKnowledgeBase:
             await asyncio.to_thread(self._sync_store.add, command)
 
     async def search(self, bot_id: int, query: str, top_k: int = 3) -> list[str]:
+        # Skip the embedding model call for bots that have no
+        # knowledge base entries — the sync ``search`` does the
+        # same short-circuit (``_has_documents``), so the user
+        # gets ``[]`` without us paying the per-query vector cost.
+        if not await self.has_documents(bot_id):
+            return []
         async with self._lock:
             return await asyncio.to_thread(self._sync_store.search, bot_id, query, top_k)
+
+    async def has_documents(self, bot_id: int) -> bool:
+        """Async wrapper around the sync ``_has_documents`` check.
+
+        Returns ``False`` for bots whose collection is empty (or
+        not yet initialised), so the chat hot path can skip the
+        embedding model call on a query that would land on zero
+        documents anyway.
+        """
+        async with self._lock:
+            return await asyncio.to_thread(self._sync_store._has_documents, bot_id)
 
     async def search_with_scores(
         self, bot_id: int, query: str, top_k: int = 5

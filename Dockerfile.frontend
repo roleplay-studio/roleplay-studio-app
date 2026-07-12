@@ -1,0 +1,40 @@
+# ──────────────────────────────────────────────────────────────────
+#  Roleplay Studio — frontend image (Vite dev server)
+#
+#  This is intentionally a DEV image — it runs `vite` (not
+#  `vite preview`). The whole project is bind-mounted so edits
+#  hot-reload. For a prod build image that bakes in `vite build`
+#  output, see the comment in Makefile under `docker-build-frontend`.
+# ──────────────────────────────────────────────────────────────────
+
+# node:22-bookworm-slim is the LTS line and matches what the
+# project's Vite + Vitest stack officially supports. Slim variant
+# keeps the image under ~200 MB.
+FROM node:22-bookworm-slim AS base
+
+# Tells Vite to bind on all interfaces inside the container so
+# the host (and the backend container) can reach it. Also avoids
+# the "use --host to expose" warning that pollutes dev logs.
+ENV HOST=0.0.0.0 \
+    NPM_CONFIG_UPDATE_NOTIFIER=false \
+    NPM_CONFIG_FUND=false
+
+WORKDIR /app
+
+# Install deps in a separate layer so `npm install` is cached and
+# only re-runs when package.json changes. node_modules is bind-
+# mounted at runtime (see docker-compose.yml), so this layer is
+# only useful as a build cache for `docker build` without the
+# compose volume override.
+#
+# We intentionally don't run `npm ci` here — that would require
+# package-lock.json, which the project currently doesn't ship
+# (npm install without lockfile is what the project does in CI).
+COPY frontend/package.json ./
+RUN npm install --no-audit --no-fund
+
+# No COPY of the source — compose bind-mounts it.
+
+EXPOSE 1420
+
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "1420", "--strictPort"]

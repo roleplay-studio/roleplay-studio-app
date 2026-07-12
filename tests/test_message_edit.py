@@ -44,6 +44,8 @@ class EditFakeMessageRepo:
         short_content=None,
         timestamp=None,
         generation_status: str = "complete",
+        dynamic_system_prompt=None,
+        state=None,
     ):
         mid = self._next_id
         self._next_id += 1
@@ -57,6 +59,7 @@ class EditFakeMessageRepo:
             is_active=is_active,
             created_at=timestamp,
             versions=[],
+            state=state,
         )
         self._msgs.append(msg)
         return mid
@@ -70,6 +73,7 @@ class EditFakeMessageRepo:
         branch_index,
         timestamp=None,
         generation_status: str = "complete",
+        state=None,
     ):
         return await self.save(
             thread_id,
@@ -79,6 +83,7 @@ class EditFakeMessageRepo:
             branch_index=branch_index,
             is_active=True,
             timestamp=timestamp,
+            state=state,
         )
 
     async def list_for_thread(self, thread_id, limit=200):

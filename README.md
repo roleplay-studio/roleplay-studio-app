@@ -114,8 +114,8 @@ cd frontend && npm install && cd ..
 
 # Create .env and put your key in
 cat > .env <<EOF
-OPENROUTER_API_KEY=sk-or-...xxxx
-OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
+LLM_API_KEY=sk-or-...xxxx
+LLM_BASE_URL=https://openrouter.ai/api/v1
 CHAT_MODEL=openai/gpt-oss-20b
 EMBEDDING_MODEL=qwen/qwen3-embedding-8b
 EOF
@@ -282,7 +282,7 @@ api            — FastAPI routes + DI via `app.deps`
 │
 ├── pyproject.toml                # Python deps + ruff + pytest
 ├── alembic.ini
-└── .env                          # OPENROUTER_API_KEY etc.
+└── .env                          # LLM_API_KEY etc.
 ```
 
 ---
@@ -351,8 +351,8 @@ All in `.env` (do not commit!) or via the environment. Defaults are for dev.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `OPENROUTER_API_KEY` | Yes | — | API key for OpenRouter / OpenAI-compatible |
-| `OPENROUTER_BASE_URL` | No | `https://openrouter.ai/api/v1` | Base URL |
+| `LLM_API_KEY` | Yes | — | API key for OpenRouter / OpenAI-compatible |
+| `LLM_BASE_URL` | No | `https://openrouter.ai/api/v1` | Base URL |
 | `CHAT_MODEL` | No | `openai/gpt-oss-20b` | Model for chat |
 | `FAST_MODEL` | No | `openai/gpt-4o-mini` | Cheap model for summarization |
 | `EMBEDDING_MODEL` | No | `qwen/qwen3-embedding-8b` | Embedding model; `""` disables RAG |

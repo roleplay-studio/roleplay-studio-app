@@ -117,3 +117,99 @@ async def test_set_first_message_invalid_index_raises() -> None:
 
     with pytest.raises(ValueError, match="out of range"):
         await svc.set_first_message(thread_id=1, bot_id=1, greeting_index=99)
+
+
+# ── get_stats ──────────────────────────────────────────────────────
+
+
+class _FakeMessageRepoForStats:
+    """In-memory ``MessageRepository`` stub for ``get_stats``.
+
+    Records ``list_for_thread`` calls so tests can verify the service
+    requests the full chain (not a paginated window). Returns whatever
+    messages the test queues up, regardless of ``limit`` — the same
+    contract as a real repo would honour for a thread with fewer rows
+    than ``limit``.
+    """
+
+    def __init__(self, messages: list[MessageDTO]) -> None:
+        self._messages = messages
+        self.list_calls: list[tuple[int, int]] = []
+
+    async def list_for_thread(
+        self, thread_id: int, limit: int = 20, before_id: int | None = None
+    ) -> list[MessageDTO]:
+        self.list_calls.append((thread_id, limit))
+        # Mirror the real SQL repo: filter out branch-inactive rows
+        # just like the prod contract does, so test-side invariants
+        # align with what the route returns.
+        return [m for m in self._messages if before_id is None or (m.id or 0) < before_id]
+
+
+class _FakeThreadRepoForStats:
+    def __init__(self, exists: bool = True) -> None:
+        self.exists = exists
+
+    async def get(self, thread_id: int):
+        return object() if self.exists else None
+
+    async def set_pending_greeting(self, thread_id: int, content: str) -> None:  # pragma: no cover
+        pass
+
+
+@pytest.mark.asyncio
+async def test_get_stats_counts_all_messages_and_estimates_tokens() -> None:
+    """get_stats returns the full-message count (not the 50-page window)
+    and a chars/4 token estimate that matches the frontend's proxy.
+    """
+    msgs = _FakeMessageRepoForStats(
+        [
+            MessageDTO(id=1, role="assistant", content="A" * 100),
+            MessageDTO(id=2, role="user", content="B" * 80),
+            MessageDTO(id=3, role="assistant", content="C" * 20),
+        ]
+    )
+    threads = _FakeThreadRepoForStats(exists=True)
+    svc = ThreadService(threads=threads, messages=msgs)  # type: ignore[arg-type]
+
+    stats = await svc.get_stats(thread_id=7)
+
+    assert stats.thread_id == 7
+    assert stats.message_count == 3
+    assert stats.token_estimate == (100 + 80 + 20) // 4  # == 50
+    # Service asked for a window larger than the 50-message UI default
+    # so it sees past the first page.
+    assert msgs.list_calls == [(7, 10_000)]
+
+
+@pytest.mark.asyncio
+async def test_get_stats_empty_thread_returns_zero() -> None:
+    """An existing-but-empty thread returns a zero-count DTO, not an error.
+
+    This is the case the chat header needs to render right after the
+    user lands on a brand-new chat.
+    """
+    msgs = _FakeMessageRepoForStats([])
+    threads = _FakeThreadRepoForStats(exists=True)
+    svc = ThreadService(threads=threads, messages=msgs)  # type: ignore[arg-type]
+
+    stats = await svc.get_stats(thread_id=42)
+
+    assert stats.thread_id == 42
+    assert stats.message_count == 0
+    assert stats.token_estimate == 0
+
+
+@pytest.mark.asyncio
+async def test_get_stats_missing_thread_raises_not_found() -> None:
+    """A thread id that doesn't exist raises NotFoundError so the route
+    layer can map it to 404 instead of returning phantom zeros.
+    """
+    msgs = _FakeMessageRepoForStats([])
+    threads = _FakeThreadRepoForStats(exists=False)
+    svc = ThreadService(threads=threads, messages=msgs)  # type: ignore[arg-type]
+
+    from app.application.exceptions import NotFoundError
+
+    with pytest.raises(NotFoundError):
+        await svc.get_stats(thread_id=999)

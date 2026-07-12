@@ -213,6 +213,9 @@ class FakeKnowledgeRepo:
     async def search(self, bot_id, query, top_k=3):
         return []
 
+    async def has_documents(self, bot_id):
+        return False
+
     async def add(self, command):
         pass
 
@@ -557,7 +560,7 @@ class TestSettings:
         dataclass-style default.
         """
         monkeypatch.delenv("FAST_MODEL", raising=False)
-        settings = Settings(openrouter_api_key="sk-test", _env_file=None)
+        settings = Settings(llm_api_key="sk-test", _env_file=None)
         assert settings.fast_model == "openai/gpt-4o-mini"
 
     def test_fast_model_from_env(self, monkeypatch):
@@ -577,7 +580,7 @@ class TestSettings:
             "THREAD_SUMMARY_INTERVAL",
         ):
             monkeypatch.delenv(k, raising=False)
-        settings = Settings(openrouter_api_key="sk-test")
+        settings = Settings(llm_api_key="sk-test")
         assert settings.summarize_enabled is True
         assert settings.summarize_max_tokens == 256
         assert settings.summarize_min_length == 100
@@ -611,7 +614,7 @@ class TestSettings:
 class TestBatchSettings:
     def test_batch_settings_defaults(self):
         """Batch summarization should be enabled by default with concurrency 3."""
-        settings = Settings(openrouter_api_key="sk-test")
+        settings = Settings(llm_api_key="sk-test")
         assert settings.summarize_batch_enabled is True
         assert settings.summarize_batch_size == 3
 

@@ -39,7 +39,7 @@
 </div>
 
 {#if open}
-  <LLMDebugModal {debug} {usage} {onclose} />
+  <LLMDebugModal {debug} {usage} state={null} {onclose} />
 {/if}
 
 <style>

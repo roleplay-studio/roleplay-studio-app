@@ -81,6 +81,8 @@ class BotRepository(Protocol):
         bot_type: BotType = BotType.RP,
         alternate_greetings: list[str] | None = None,
         mes_example: str = "",
+        dynamic_system_prompt: str = "",
+        world_state_prompt: str = "",
     ) -> int: ...
 
     async def update(
@@ -96,6 +98,8 @@ class BotRepository(Protocol):
         bot_type: BotType = BotType.RP,
         alternate_greetings: list[str] | None = None,
         mes_example: str | None = None,
+        dynamic_system_prompt: str | None = None,
+        world_state_prompt: str | None = None,
     ) -> None: ...
 
     async def get(self, bot_id: int) -> Bot | None: ...
@@ -159,6 +163,17 @@ class MessageRepository(Protocol):
         timestamp: datetime | None = None,
         generation_status: str = "complete",
         reasoning: str | None = None,
+        # Stamped by the orchestrator at stream time when the bot has a
+        # non-empty ``dynamic_system_prompt`` so the chat UI can render
+        # the floating-prompt panel. ``None`` = no floating prompt was
+        # sent (default for bots that don't use the feature).
+        dynamic_system_prompt: str | None = None,
+        # Per-message world-state snapshot for assistant turns. ``None``
+        # means "don't set" (column stays NULL); pass ``""`` to
+        # explicitly clear an existing state. Stamped by
+        # ``regenerate_state`` after each assistant turn; can also be
+        # edited by the user via the EditMessageModal.
+        state: str | None = None,
     ) -> int | None: ...
 
     async def save_exchange(
@@ -176,9 +191,42 @@ class MessageRepository(Protocol):
         before_id: int | None = None,
     ) -> list[MessageDTO]: ...
 
+    async def count_active(self, thread_id: int) -> int:
+        """Count the active chain of messages in ``thread_id``.
+
+        Mirrors the ``list_for_thread`` filter: rows with no
+        ``branch_group`` plus the active row of any branch group.
+        Used by ``ThreadService.get_stats`` so the chat header reports
+        total messages rather than the latest paginated window.
+
+        Returns 0 for unknown / empty threads (not an error).
+        """
+        ...
+
     async def clear_thread(self, thread_id: int) -> None: ...
 
     async def update(self, message_id: int, content: str) -> None: ...
+
+    async def update_state(self, message_id: int, state: str) -> None: ...
+
+    async def get_previous_assistant_state(
+        self, thread_id: int, before_message_id: int | None = None
+    ) -> str:
+        """Return the most recent non-empty ``Conversation.state`` for an
+        assistant message in the thread, optionally restricted to
+        messages with id strictly less than ``before_message_id``.
+
+        Returns ``""`` if no such state exists (brand-new thread,
+        state-update hadn't landed yet, or the bot has no
+        ``world_state_prompt``).
+
+        This is a precise lookup — unlike ``list_for_thread`` with a
+        small ``limit``, it does NOT depend on the DESC window size
+        accidentally including the right row. Used by
+        ``ChatService.regenerate_state`` to feed the LLM the previous
+        turn's state so it can mutate it rather than start from scratch.
+        """
+        ...
 
     async def update_short_content(self, message_id: int, short_content: str) -> None: ...
 
@@ -206,6 +254,14 @@ class MessageRepository(Protocol):
         timestamp: datetime | None = None,
         generation_status: str = "complete",
         reasoning: str | None = None,
+        # World-state snapshot to copy into the new branch. ``None``
+        # means "leave NULL on the new row" (matches the historical
+        # behaviour where state was an opaque system attribute);
+        # ``""`` explicitly clears it. The service layer is expected
+        # to forward the *original* message's state here so branched
+        # edits don't silently drop the world-state context the user
+        # was looking at when they decided to edit.
+        state: str | None = None,
     ) -> int | None:
         """Save a message with explicit branch group."""
         ...
@@ -259,6 +315,18 @@ class KnowledgeBaseRepository(Protocol):
     ) -> list[tuple[str, float]]: ...
 
     async def list_entries(self, bot_id: int) -> list[KnowledgeEntryDTO]: ...
+
+    async def has_documents(self, bot_id: int) -> bool:
+        """Cheap "is the KB non-empty for this bot?" probe.
+
+        Lets the chat hot path skip the per-turn embedding model
+        call when the bot has no knowledge base entries — the
+        similarity search would return ``[]`` anyway, so paying
+        the vector cost is pure waste. Implementations must use
+        metadata-only reads (``vectorstore.get(include=[])``) and
+        must NOT call the embedding function.
+        """
+        ...
 
     async def delete(self, bot_id: int, entry_id: str) -> None: ...
 
