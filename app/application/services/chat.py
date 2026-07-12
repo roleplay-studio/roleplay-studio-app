@@ -778,9 +778,7 @@ class ChatService:
             # we silently bail — there's no assistant content to seed
             # the state-prompt with, and we never want to fabricate
             # one.
-            assistant_msg_text = await self._load_assistant_content(
-                thread_id, assistant_message_id
-            )
+            assistant_msg_text = await self._load_assistant_content(thread_id, assistant_message_id)
             if not assistant_msg_text:
                 logger.info(
                     "regenerate_state skipped for message %d: "
@@ -798,10 +796,8 @@ class ChatService:
             # user turns, an edit that landed as a fresh insert with a
             # higher id, etc.). The dedicated query is both correct
             # AND cheaper.
-            previous_state = (
-                await self._messages.get_previous_assistant_state(
-                    thread_id, before_message_id=assistant_message_id
-                )
+            previous_state = await self._messages.get_previous_assistant_state(
+                thread_id, before_message_id=assistant_message_id
             )
 
             # Step 3: the LLM call. ``max_tokens`` is bounded to
@@ -1284,6 +1280,10 @@ class ChatService:
                     next_branch_index,
                     generation_status="stopped",
                     reasoning=full_reasoning or None,
+                    # Stamp the floating prompt so the regen UI panel
+                    # shows what was injected. Mirrors the stream_message
+                    # path which already passes this through.
+                    dynamic_system_prompt=request.dynamic_system_prompt or None,
                 )
             yield {"type": "stopped"}
             return
@@ -1311,6 +1311,11 @@ class ChatService:
                 next_branch_index,
                 generation_status="complete",
                 reasoning=full_reasoning or None,
+                # Match stream_message's contract: the regen UI panel
+                # shows what was injected. Without this, the user
+                # sees an empty "Dynamic system prompt" section even
+                # though the LLM received the [Reminder] block.
+                dynamic_system_prompt=request.dynamic_system_prompt or None,
             )
             # Build versions list
             new_versions = await self._messages.get_versions(new_id) if new_id is not None else []
@@ -1495,12 +1500,8 @@ class ChatService:
         # internally, but checking here saves the async hop and
         # the lock acquisition on the chat hot path.
         context: list[str] = []
-        if self._knowledge is not None and await self._knowledge.has_documents(
-            command.bot_id
-        ):
-            context = await self._knowledge.search(
-                command.bot_id, command.user_input, top_k=15
-            )
+        if self._knowledge is not None and await self._knowledge.has_documents(command.bot_id):
+            context = await self._knowledge.search(command.bot_id, command.user_input, top_k=15)
 
         user_persona = None
         if command.persona_id is not None and self._personas is not None:
@@ -1611,18 +1612,12 @@ class ChatService:
             # fields exist on the model) — we just don't push them
             # into the request.
             dynamic_system_prompt=(
-                getattr(bot, "dynamic_system_prompt", "") or ""
-                if bot_type == BotType.RP
-                else ""
+                getattr(bot, "dynamic_system_prompt", "") or "" if bot_type == BotType.RP else ""
             ),
             world_state_prompt=(
-                getattr(bot, "world_state_prompt", "") or ""
-                if bot_type == BotType.RP
-                else ""
+                getattr(bot, "world_state_prompt", "") or "" if bot_type == BotType.RP else ""
             ),
-            prev_world_state=(
-                prev_world_state if bot_type == BotType.RP else ""
-            ),
+            prev_world_state=(prev_world_state if bot_type == BotType.RP else ""),
         )
 
     # ── Section 8: Branch-aware deletion helpers ─────────────────────

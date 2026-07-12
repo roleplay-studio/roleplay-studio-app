@@ -77,7 +77,9 @@ class _RecordingMessageRepo:
         generation_status: str = "complete",
         reasoning=None,
         state=None,
-    ) -> int | None:
+        # 0.0.6 — float prompt snapshot, mirrors the real repo.
+        dynamic_system_prompt: str | None = None,
+    ):
         new_id = self._next_id
         self._next_id += 1
         self.save_branch_calls.append(

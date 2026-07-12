@@ -260,6 +260,11 @@ class MessageRepository(Protocol):
         # edits don't silently drop the world-state context the user
         # was looking at when they decided to edit.
         state: str | None = None,
+        # Floating system-prompt snapshot the LLM received on this
+        # turn. Stamped so the chat UI can render the "what was sent"
+        # panel on regenerated messages too, matching the contract on
+        # ``save``. ``None`` = no floating prompt was injected.
+        dynamic_system_prompt: str | None = None,
     ) -> int | None:
         """Save a message with explicit branch group."""
         ...

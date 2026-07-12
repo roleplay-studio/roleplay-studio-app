@@ -606,6 +606,7 @@ class SqlAlchemyMessageRepository:
         generation_status: str = "complete",
         reasoning: str | None = None,
         state: str | None = None,
+        dynamic_system_prompt: str | None = None,
     ) -> int | None:
         return await self.save(
             thread_id,
@@ -618,6 +619,7 @@ class SqlAlchemyMessageRepository:
             generation_status=generation_status,
             reasoning=reasoning,
             state=state,
+            dynamic_system_prompt=dynamic_system_prompt,
         )
 
     async def save_exchange(
@@ -690,7 +692,7 @@ class SqlAlchemyMessageRepository:
                 rows_result = await session.execute(
                     text(
                         f"SELECT id, thread_id, role, content, short_content, timestamp, "
-                        f"branch_group, branch_index, is_active "
+                        f"branch_group, branch_index, is_active, dynamic_system_prompt "
                         f"FROM conversations "
                         f"WHERE thread_id = :tid AND branch_group IN ({placeholders}) "
                         f"ORDER BY branch_index ASC"
@@ -715,6 +717,15 @@ class SqlAlchemyMessageRepository:
                             branch_group=bg,
                             branch_index=row.branch_index or 0,
                             is_active=bool(row.is_active),
+                            # Added in 0.0.6: read the floating-prompt
+                            # column through the raw-SQL branch path
+                            # too. Without this, regenerated branches
+                            # saved via ``save_branch`` lose the
+                            # snapshot on read because the SELECT
+                            # clause above never asked for the
+                            # column and ``MessageDTO`` defaults to
+                            # ``None`` on construction.
+                            dynamic_system_prompt=row.dynamic_system_prompt or None,
                         )
                     )
 
@@ -774,8 +785,7 @@ class SqlAlchemyMessageRepository:
             result = await session.execute(
                 select(func.count(Conversation.id)).where(
                     Conversation.thread_id == thread_id,
-                    (Conversation.branch_group.is_(None))
-                    | (Conversation.is_active.is_(True)),
+                    (Conversation.branch_group.is_(None)) | (Conversation.is_active.is_(True)),
                     Conversation.content.isnot(None) & (Conversation.content != ""),
                 )
             )
@@ -936,13 +946,21 @@ class SqlAlchemyMessageRepository:
                     content=v.content,
                     short_content=v.short_content,
                     reasoning=v.reasoning,
+                    # 0.0.6 fix: ``get_versions`` built the DTO without
+                    # carrying over ``dynamic_system_prompt`` — the
+                    # column was saved by ``save_branch`` but the
+                    # read path silently dropped it, so the chat UI
+                    # never showed the floating-prompt panel for
+                    # regenerated branches. Mirror ``list_for_thread``
+                    # and propagate the column here too.
+                    dynamic_system_prompt=v.dynamic_system_prompt or None,
                     created_at=v.timestamp,
                     branch_group=v.branch_group,
                     branch_index=v.branch_index,
                     is_active=v.is_active,
                 )
                 for v in versions
-            ]
+            ]  # fmt: skip
 
     async def switch_version(self, branch_group: str, target_version_id: int) -> None:
         """Set target_version_id is_active=True, all others in branch_group=False."""
@@ -1448,7 +1466,6 @@ def _parse_categories(categories: str | list | None) -> list[str]:
         return []
 
 
-
 # ── Settings Repository ────────────────────────────────────────────
 
 
@@ -1477,9 +1494,7 @@ class SqlAlchemySettingsRepository:
                 return None
             return _parse_categories(row.bot_categories_json)
 
-    async def set_bot_categories(
-        self, categories: list[str], payload: str
-    ) -> None:
+    async def set_bot_categories(self, categories: list[str], payload: str) -> None:
         """Upsert the singleton row with the encoded JSON ``payload``.
 
         ``categories`` is passed alongside for repositories that
