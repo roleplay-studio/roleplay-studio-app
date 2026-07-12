@@ -537,8 +537,7 @@ export const api = {
   getThread: (id: number) => request<Thread>(`/api/threads/${id}`),
   // Header-level thread stats used by the chat header — full count,
   // independent of listMessages pagination. See Chat.svelte binding.
-  getThreadStats: (threadId: number) =>
-    request<ThreadStats>(`/api/threads/${threadId}/stats`),
+  getThreadStats: (threadId: number) => request<ThreadStats>(`/api/threads/${threadId}/stats`),
   // Health
   health: () => request<{ status: string }>('/api/health'),
   importBot: async (file: File): Promise<{ id: number }> => {
@@ -749,12 +748,7 @@ export const api = {
   // pass ``""`` to explicitly clear it, pass a string to overwrite.
   // The EditMessageModal's "Save" sends the currently-typed value
   // (including empty), so the network shape is always present.
-  updateMessage: (
-    threadId: number,
-    messageId: number,
-    content: string,
-    state?: null | string,
-  ) =>
+  updateMessage: (threadId: number, messageId: number, content: string, state?: null | string) =>
     request<{ ok: boolean }>(`/api/threads/${threadId}/messages/${messageId}`, {
       body: JSON.stringify({ content, state: state ?? null }),
       method: 'PUT',
@@ -828,6 +822,31 @@ export interface ServerInfo {
   version: string;
 }
 
+/** Response body when TTS is disabled (HTTP 503). */
+export interface TTSDisabled {
+  detail: string;
+}
+
+export interface TTSSynthesizeRequest {
+  model?: null | string;
+  /** 0.5 .. 2.0 — clamped by the server */
+  speed?: number;
+  text: string;
+  voice_id?: null | string;
+}
+
+// ── TTS (text-to-speech) ─────────────────────────────────────────────
+// Frontend-only types; the route and cache contract live server-side.
+
+export interface TTSSynthesizeResponse {
+  /** Always `/api/tts/audio/<cache_id>` (resolves against apiBase). */
+  audio_url: string;
+  /** 16-char hex cache id; the key the GET endpoint streams. */
+  cache_id: string;
+  /** True if this call hit the disk cache and skipped the provider. */
+  from_cache: boolean;
+}
+
 /**
  * Probe a candidate server URL for the /api/server-info endpoint.
  * Used by ConnectToServer.svelte to validate a manually-entered
@@ -854,4 +873,43 @@ export async function getServerInfo(candidateUrl: string): Promise<ServerInfo> {
  */
 export function reindexEventSource(jobId: string): EventSource {
   return new EventSource(`${apiBase()}/api/config/knowledge/reindex/${jobId}/stream`);
+}
+
+export const ttsApi = {
+  /** Absolute URL for a cached audio blob, suitable for ``<audio src="...">``. */
+  audioUrl(cache_id: string): string {
+    return `${apiBase()}/api/tts/audio/${cache_id}`;
+  },
+
+  /**
+   * Synthesize text to speech. Returns a 16-char cache id that the
+   * caller can fetch via ``audioFor(cache_id)`` (using the same
+   * apiBase origin).
+   *
+   * Backend returns 503 when ``Settings.tts_provider == "disabled"``;
+   * rethrow as a flagged error so callers can hide the play button.
+   */
+  async synthesize(req: TTSSynthesizeRequest): Promise<TTSSynthesizeResponse> {
+    const res = await fetch(`${apiBase()}/api/tts/synthesize`, {
+      body: JSON.stringify(req),
+      headers: { 'Content-Type': 'application/json' },
+      method: 'POST',
+    });
+    if (res.status === 503) {
+      // Distinguish "disabled" from a real provider failure by
+      // surfacing a typed error code; the UI uses this to hide the
+      // play button instead of showing an error toast on every page.
+      const body = (await res.json().catch(() => ({ detail: 'tts disabled' }))) as TTSDisabled;
+      throw new TTSDisabledError(body.detail || 'TTS disabled');
+    }
+    if (!res.ok) {
+      throw new Error(`TTS synthesize failed: ${res.status}`);
+    }
+    return (await res.json()) as TTSSynthesizeResponse;
+  },
+};
+
+/** Thrown when the backend returns 503 because TTS is disabled. */
+export class TTSDisabledError extends Error {
+  override name = 'TTSDisabledError';
 }

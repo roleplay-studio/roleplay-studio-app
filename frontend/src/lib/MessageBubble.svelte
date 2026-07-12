@@ -6,7 +6,7 @@
   import { formatRelativeTime } from './time';
   import ActionButtons from './ui/ActionButtons.svelte';
   import GameStats from './ui/GameStats.svelte';
-  import { GeneratedAvatar, Tooltip } from './ui/index';
+  import { GeneratedAvatar, Tooltip, TTSButton } from './ui/index';
   import { type MetadataEntry, parseMessageContent } from './utils/parseMetadata';
 
   const {
@@ -263,6 +263,9 @@
       {#if msg.id !== null}
         <div class="mb-actions">
           {@render versionControls()}
+          {#if msg.content}
+            <TTSButton content={parsed.mainContent} />
+          {/if}
           {#if isLast && msg.role === 'assistant' && onregenerate}
             <Tooltip text={t('message.regenerate', lang)} position="bottom">
               <button

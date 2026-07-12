@@ -16,3 +16,4 @@ export { default as Textarea } from './Textarea.svelte';
 export { default as ThreadItem } from './ThreadItem.svelte';
 export { default as Toggle } from './Toggle.svelte';
 export { default as Tooltip } from './Tooltip.svelte';
+export { default as TTSButton } from './TTSButton.svelte';
