@@ -18,7 +18,9 @@ the frontend hides the play button.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import time
 from dataclasses import dataclass
 
 import httpx
@@ -178,6 +180,7 @@ class MiniMaxTTSProvider:
             # errors; expose that text in the wrapped exception so logs
             # carry the operator-visible reason (not just a status code).
             snippet = resp.text[:200]
+            _dump_raw_response("minimax", f"http_{resp.status_code}", resp, resp.text)
             raise RuntimeError(f"TTS provider {resp.status_code}: {snippet}")
         # Validate the JSON envelope **before** the audio-decode path so
         # the user sees a meaningful "what did MiniMax return" message
@@ -200,9 +203,10 @@ class MiniMaxTTSProvider:
         audio_hex = (data or {}).get("audio") if isinstance(data, dict) else None
         if isinstance(audio_hex, str) and audio_hex:
             return bytes.fromhex(audio_hex)
-        # Truncate so the error stays under the FastAPI 200-char default
-        # response-size hint while still leaving a recognisable shape
-        # the operator can paste into a debugging session.
+        # Persist the full response before we throw — the operator
+        # opens the dump file to see what MiniMax actually returned,
+        # which is the only way to diagnose region/key/model mismatches.
+        _dump_raw_response("minimax", "no_data_audio", resp, resp.text)
         preview = resp.text[:400]
         raise RuntimeError(
             f"TTS response missing data.audio: status={resp.status_code} "
@@ -256,6 +260,56 @@ class MiniMaxTTSProvider:
 #: the **wire**, not the audio.
 _MOCK_MP3_HEADER = b"\x49\x44\x33"  # "ID3" tag — players treat as metadata-only MP3
 _MOCK_MP3_SUFFIX = b"\xff\xfb"  # MPEG audio frame sync — enough for some players to start
+
+
+def _dump_raw_response(provider: str, reason: str, resp: httpx.Response, body: str) -> None:
+    """Persist the full MiniMax response body to disk for postmortem.
+
+    Triggered every time the provider call ends up in an error path.
+    Writes under ``$ROLEPLAY_DATA_DIR/logs/tts_<ts>_<reason>.json`` so
+    the operator can ``cat`` the file regardless of the truncation
+    applied to the error message returned to the SPA.
+
+    The dump is best-effort: a write failure here is *not* a reason
+    to mask the upstream error — we only log it to ``logger``
+    (which is the project logger, not user-facing).
+    """
+    from app.infrastructure.config import Settings  # local import keeps top-level cheap
+
+    settings = Settings.from_env()
+    out_dir = settings.data_dir / "logs"
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.debug("tts dump: cannot create %s (%s)", out_dir, exc)
+        return
+    fname = f"tts_{int(time.time() * 1000)}_{provider}_{reason}.json"
+    target = out_dir / fname
+    try:
+        payload = {
+            "ts": int(time.time()),
+            "provider": provider,
+            "reason": reason,
+            "request": {
+                "method": "POST",
+                "url": str(resp.request.url) if resp.request else None,
+                "headers_redacted": {k: v for k, v in (resp.request.headers.items() if resp.request else []) if k.lower() != "authorization"},
+            },
+            "response": {
+                "status_code": resp.status_code,
+                "headers": dict(resp.headers),
+                "body": body,
+            },
+        }
+        target.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+        # Surface the path so the operator sees it in the message they
+        # paste into a bug report — the actual content lives in the file.
+        body_log = body
+        if len(body_log) > 8000:
+            body_log = body_log[:8000] + f"... <{len(body) - 8000} more chars>"
+        logger.warning("tts dump persisted at %s\nbody preview:\n%s", target, body_log)
+    except Exception as exc:  # pragma: no cover — defensive
+        logger.debug("tts dump: cannot write %s (%s)", target, exc)
 
 
 class MockTTSProvider:
