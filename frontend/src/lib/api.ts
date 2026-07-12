@@ -2,6 +2,31 @@
 
 const DEFAULT_API_BASE = 'http://127.0.0.1:55245';
 
+// When running behind the Vite dev server (host or Docker) the
+// API is reachable on the same origin via the /api proxy. We
+// detect that by checking the build-time VITE_USE_PROXY flag —
+// set automatically by docker-compose and ignored otherwise.
+//
+// This means `npm run dev` on the host still hits :55245
+// directly (the previous behaviour, no surprises), but
+// `docker compose up` automatically uses relative URLs that go
+// through Vite → backend container. No environment-switch dance
+// needed at the JS layer.
+const USE_PROXY =
+  // Vite injects import.meta.env.* at build time; the boolean
+  // cast works whether the flag was set as `true` or `"true"`.
+  // string('true') === true, so the negation below is safe.
+  // We invert because a missing flag is the historical default
+  // (direct fetch from :55245).
+  String(import.meta.env?.VITE_USE_PROXY ?? '').toLowerCase() === 'true';
+
+const PROXY_API_BASE =
+  typeof window !== 'undefined' && window.location?.origin
+    ? window.location.origin
+    : DEFAULT_API_BASE;
+
+const INITIAL_API_BASE = USE_PROXY ? PROXY_API_BASE : DEFAULT_API_BASE;
+
 /**
  * Resolved API base URL. Re-reads `localStorage.serverUrl` on every
  * `apiBase()` call. Use as `apiBase()` instead of `API_BASE` in
@@ -19,7 +44,7 @@ export function apiBase(): string {
   } catch {
     /* localStorage unavailable — fall through */
   }
-  return DEFAULT_API_BASE;
+  return INITIAL_API_BASE;
 }
 
 /**

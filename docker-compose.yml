@@ -1,0 +1,175 @@
+# ──────────────────────────────────────────────────────────────────
+#  Roleplay Studio — dev stack (backend + Vite frontend)
+#
+#  Usage:
+#    docker compose up --build      # build images + start both
+#    docker compose up              # start if images exist
+#    docker compose down            # stop + remove containers
+#    docker compose down -v         # also drop the data volume
+#                                   # (conversations.db, chroma,
+#                                   # uploads, .env)
+#    docker compose logs -f backend # follow backend output
+#    docker compose exec backend pytest            # run tests
+#    docker compose exec backend ruff check .
+#    docker compose exec frontend npm run lint
+#
+#  Networking:
+#    - backend listens on 0.0.0.0:55245 inside the container.
+#    - frontend (Vite) listens on 0.0.0.0:1420 and proxies /api +
+#      /uploads to backend:55245, so opening http://localhost:1420
+#      in a browser Just Works without CORS gymnastics.
+#    - Direct API calls from outside the stack: http://localhost:55245.
+#
+#  Volumes:
+#    - Source code is bind-mounted so edits hot-reload (Vite HMR
+#      on the frontend, no reload on the backend — use
+#      `docker compose restart backend` after backend changes,
+#      or run the test compose for proper autoreload).
+#    - A named volume `roleplay_data` holds .env, conversations.db,
+#      chroma_db/, uploads/ so a `docker compose down` without -v
+#      preserves your state across runs. Use `make docker-clean`
+#      to wipe it.
+# ──────────────────────────────────────────────────────────────────
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    image: roleplay-studio-backend:dev
+    container_name: roleplay-backend
+    restart: unless-stopped
+    # Bind on all interfaces inside the container so the frontend
+    # container can reach us by service name. The compose `ports:`
+    # below maps :55245 on the host to :55245 in the container.
+    command: ["python", "/app/backend/run_backend.py"]
+    environment:
+      # ROLEPLAY_DATA_DIR points the backend at a stable location
+      # *inside* the container. Combined with the named volume
+      # below, .env / db / chroma survive container restarts.
+      ROLEPLAY_DATA_DIR: /data
+      # Dev-mode debug logging — matches what `make dev-backend`
+      # does on the host. The test compose override explicitly
+      # clears DEBUG/ENVIRONMENT/LOG_LEVEL because Settings merges
+      # compose `environment:` additively (it can't "unset" a
+      # var, only override it with an empty value).
+      DEBUG: "true"
+      ENVIRONMENT: development
+      LOG_LEVEL: DEBUG
+      # Listen on all interfaces inside the container so the
+      # frontend service can reach us by DNS name. The compose
+      # `ports:` below still maps the host's :55245 to the
+      # container's :55245.
+      HYPERCORN_BIND: 0.0.0.0:55245
+      # Allow any host to call the API. Same CORS posture as the
+      # bare FastAPI app — already wide-open in api/main.py.
+      # Override here only if you want to lock it down.
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      # VIRTUAL_ENV is read by tests (test_print_qr.py derives
+      # the venv's python from it). Setting it here makes the
+      # dev stack behave like `uv run pytest` on the host.
+      VIRTUAL_ENV: /app/.venv
+    volumes:
+      # Live source code. Read-only except where noted: the test
+      # suite writes to /tmp and SQLModel uses :memory: for many
+      # fixtures, so the source itself stays read-only safely.
+      - ./api:/app/api:ro
+      - ./app:/app/app:ro
+      - ./backend:/app/backend:ro
+      - ./scenarios:/app/scenarios:ro
+      - ./engine:/app/engine:ro
+      - ./schemas:/app/schemas:ro
+      - ./scripts:/app/scripts:ro
+      - ./tests:/app/tests:ro
+      # Alembic needs alembic.ini + the alembic/ directory next to
+      # the SQLAlchemy store root (init_db looks at /app/alembic.ini).
+      # Without these the very first startup fails with
+      # `RuntimeError: alembic.ini not found at /app/alembic.ini`.
+      - ./alembic.ini:/app/alembic.ini:ro
+      - ./alembic:/app/alembic:ro
+      - ./pyproject.toml:/app/pyproject.toml:ro
+      - ./uv.lock:/app/uv.lock:ro
+      # Persistent state — survives `docker compose down`.
+      # Owned by the same UID as the host user (default 1000)
+      # so the bind-mounted dir works when the operator wants
+      # to peek inside.
+      - roleplay_data:/data
+    ports:
+      - "55245:55245"
+    healthcheck:
+      # The /api/health endpoint is already a DB-ready probe.
+      # `start_period` covers uv sync + first-time pip install
+      # on a cold image; `interval` keeps the probe cheap.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:55245/api/health', timeout=2)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+    networks:
+      - rpnet
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    image: roleplay-studio-frontend:dev
+    container_name: roleplay-frontend
+    restart: unless-stopped
+    # Vite dev server. `--host 0.0.0.0` is already in the Dockerfile
+    # CMD but we re-state it here so `docker compose run --rm
+    # frontend npm run build` (no CMD override) is unambiguous.
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "1420", "--strictPort"]
+    working_dir: /app/frontend
+    environment:
+      # Vite proxy target. vite.config.ts reads this and rewrites
+      # /api/* + /uploads/* to backend:55245 inside the docker
+      # network. This is the cleanest way to avoid CORS in the
+      # browser without touching the API_BASE constant in
+      # frontend/src/lib/api.ts.
+      VITE_API_PROXY: http://backend:55245
+      # Tells api.ts to use relative (proxy) URLs instead of
+      # reaching for 127.0.0.1:55245 directly. Without this, the
+      # browser would try to reach the host's :55245 (often
+      # nothing is listening there) instead of the proxied
+      # backend.
+      VITE_USE_PROXY: "true"
+    volumes:
+      - ./frontend/src:/app/frontend/src:ro
+      - ./frontend/public:/app/frontend/public:ro
+      - ./frontend/index.html:/app/frontend/index.html:ro
+      - ./frontend/vite.config.ts:/app/frontend/vite.config.ts:ro
+      - ./frontend/tsconfig.json:/app/frontend/tsconfig.json:ro
+      - ./frontend/svelte.config.js:/app/frontend/svelte.config.js:ro
+      - ./frontend/package.json:/app/frontend/package.json:ro
+      - ./frontend/eslint.config.js:/app/frontend/eslint.config.js:ro
+      - ./frontend/vitest.setup.ts:/app/frontend/vitest.setup.ts:ro
+      # node_modules MUST come from inside the container — the
+      # host's node_modules was built against host glibc / node
+      # and won't load inside the slim Debian image. Anonymous
+      # volume keeps the container's node_modules separate from
+      # the bind-mount.
+      - /app/frontend/node_modules
+    ports:
+      # Map 4173 (Vite preview default) on the host instead of
+      # 1420 because 1420 is the project's host-side dev port
+      # and may already be taken by `make dev-frontend`. The
+      # container still listens on 1420 internally — the mapping
+      # is purely host:container.
+      - "4173:1420"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - rpnet
+
+networks:
+  rpnet:
+    driver: bridge
+
+volumes:
+  roleplay_data:
+    # No `driver_opts` — the default local driver is correct on
+    # macOS / Linux. Docker Desktop on macOS stores the volume
+    # under ~/Library/Containers/.../Data; use `docker volume
+    # inspect roleplay-studio-app_roleplay_data` to find the
+    # mountpoint if you need to peek.

@@ -1,0 +1,86 @@
+# ──────────────────────────────────────────────────────────────────
+#  .dockerignore — keep the build context tiny and exclude
+#  host-only artifacts that would either bloat the image or
+#  conflict with the bind-mounted source.
+# ──────────────────────────────────────────────────────────────────
+
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Local virtualenv + Python caches — recreated inside the image
+# via `uv sync`. Sending them in would clash with the slim image's
+# glibc and break every wheel.
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache
+.ruff_cache
+.mypy_cache
+
+# Node
+node_modules
+frontend/node_modules
+.npm
+.eslintcache
+
+# Local data — recreated inside the container's named volume.
+# If we bind-mount the host's chroma_db the container's SQLite
+# would refuse to open (different page size than host glibc).
+conversations.db
+*.db
+chroma_db
+uploads
+
+# Build artifacts
+dist
+build
+*.egg-info
+frontend/src-tauri/target
+frontend/dist
+frontend/build
+frontend/svelte-kit
+frontend/.svelte-kit
+
+# Logs + runtime pidfiles
+logs
+*.log
+.backend.pid
+.vite.pid
+
+# Editor / OS
+.DS_Store
+.idea
+.vscode
+*.swp
+
+# Agent / hermes scratch
+.hermes
+.playwright-mcp
+frontend/test-results
+frontend/playwright-report
+frontend/blob-report
+frontend/playwright/.cache
+frontend/e2e_tmp
+frontend/e2e-vite.log
+
+# Tests don't ship into runtime images — they're only useful
+# for the test compose override (which re-adds them).
+tests
+# (Keep tests/ visible to the test compose via the override.)
+
+# Bundled demo data — not needed for the dev stack; it's for the
+# installer/DMG smoke tests on the host.
+demo
+
+# Docker meta — avoid recursive copies
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Markdown docs (keep README/AGENTS out of build context)
+*.md
+!README.md

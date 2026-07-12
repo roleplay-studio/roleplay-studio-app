@@ -403,6 +403,105 @@ build-frontend: ## Build frontend (Vite)
 build-backend: ## Build backend binary (PyInstaller)
 	$(PY) -m PyInstaller backend/run_backend.spec
 
+# ─── Docker ────────────────────────────────────────────────────────
+#
+# Dev stack in two containers (backend + Vite frontend). Hot-reload
+# via bind mounts; persistent state in the `roleplay_data` named
+# volume.
+#
+# Common workflows:
+#   make docker-up           # build + start, logs to terminal
+#   make docker-up-d         # start in background (same as
+#                            # `docker compose up -d`)
+#   make docker-down         # stop + remove containers (keeps
+#                            # data volume)
+#   make docker-clean        # also remove the data volume
+#                            # (nuclear — wipes .env, db, chroma)
+#   make docker-logs         # tail both services
+#   make docker-logs-backend # tail one service
+#   make docker-shell-backend
+#                            # interactive shell in backend
+#   make docker-test         # run pytest in clean container
+#   make docker-test-shell   # pytest with a shell first (debug)
+#   make docker-restart-backend
+#                            # restart only the backend after a
+#                            # code change (compose bind-mount
+#                            # doesn't autoreload Python).
+
+# Compose is a thin wrapper over docker compose. We always invoke
+# it with the project root as workdir so the bind mounts work
+# even when make is invoked from a subdirectory.
+COMPOSE := docker compose
+COMPOSE_TEST := docker compose -f docker-compose.yml -f docker-compose.test.yml
+
+.PHONY: docker-up
+docker-up: ## Build images and start the dev stack in foreground
+	$(COMPOSE) up --build
+
+.PHONY: docker-up-d
+docker-up-d: ## Start the dev stack in background (logs via docker-logs)
+	$(COMPOSE) up -d --build
+
+.PHONY: docker-down
+docker-down: ## Stop and remove containers (keeps the data volume)
+	$(COMPOSE) down
+
+.PHONY: docker-clean
+docker-clean: ## Stop containers AND wipe the persistent data volume
+	$(COMPOSE) down -v
+
+.PHONY: docker-logs
+docker-logs: ## Tail logs from both services (Ctrl-C to stop)
+	$(COMPOSE) logs -f
+
+.PHONY: docker-logs-backend
+docker-logs-backend: ## Tail only the backend service
+	$(COMPOSE) logs -f backend
+
+.PHONY: docker-logs-frontend
+docker-logs-frontend: ## Tail only the frontend service
+	$(COMPOSE) logs -f frontend
+
+.PHONY: docker-ps
+docker-ps: ## Show running containers + health status
+	$(COMPOSE) ps
+
+.PHONY: docker-restart-backend
+docker-restart-backend: ## Restart only the backend (after Python code changes)
+	$(COMPOSE) restart backend
+
+.PHONY: docker-restart-frontend
+docker-restart-frontend: ## Restart only the frontend (rare — Vite HMR handles most edits)
+	$(COMPOSE) restart frontend
+
+.PHONY: docker-shell-backend
+docker-shell-backend: ## Open an interactive shell in the backend container
+	$(COMPOSE) exec backend bash
+
+.PHONY: docker-shell-frontend
+docker-shell-frontend: ## Open an interactive shell in the frontend container
+	$(COMPOSE) exec frontend sh
+
+.PHONY: docker-test
+docker-test: ## Run pytest inside the test compose override
+	$(COMPOSE_TEST) run --rm backend pytest
+
+.PHONY: docker-test-shell
+docker-test-shell: ## Drop into a shell in the test compose (debug fixtures interactively)
+	$(COMPOSE_TEST) run --rm backend bash
+
+.PHONY: docker-ruff
+docker-ruff: ## Run ruff check inside the backend container
+	$(COMPOSE_TEST) run --rm backend ruff check .
+
+.PHONY: docker-frontend-lint
+docker-frontend-lint: ## Run frontend eslint inside its container
+	$(COMPOSE) exec frontend npm run lint
+
+.PHONY: docker-frontend-test
+docker-frontend-test: ## Run frontend vitest inside its container
+	$(COMPOSE) exec frontend npm run test
+
 # ─── Clean ─────────────────────────────────────────────────────────
 
 .PHONY: clean
