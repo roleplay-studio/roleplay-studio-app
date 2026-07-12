@@ -14,6 +14,7 @@ from app.application.services import (
     SettingsService,
     SummaryService,
     ThreadService,
+    TTSService,
     UploadService,
 )
 from app.infrastructure.reindex import ReindexService
@@ -49,3 +50,9 @@ class ApplicationContainer:
     # ``None`` so existing tests that build the dataclass manually
     # still pass without a settings service.
     settings: SettingsService | None = None
+    # Text-to-speech. ``None`` when ``Settings.tts_provider ==
+    # "disabled"`` (default) — the route returns 503 so the
+    # frontend hides the play button. When set, also carries the
+    # provider's startup/close lifecycle so the lifespan handler
+    # can wire it up alongside the chat LLM.
+    tts: TTSService | None = None

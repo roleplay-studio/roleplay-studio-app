@@ -16,6 +16,7 @@ from app.application.services import (
     SettingsService,
     SummaryService,
     ThreadService,
+    TTSService,
     UploadService,
 )
 from app.infrastructure.config import Settings
@@ -36,6 +37,7 @@ from app.infrastructure.repositories.sqlalchemy import (
     SqlAlchemyThreadFileRepository,
     SqlAlchemyThreadRepository,
 )
+from app.infrastructure.tts import MiniMaxTTSProvider, MockTTSProvider
 from app.infrastructure.vectorstore import AsyncChromaKnowledgeBase, ChromaKnowledgeBase
 
 logger = logging.getLogger(__name__)
@@ -103,6 +105,36 @@ def build_container(settings: Settings | None = None) -> ApplicationContainer:
     # time; the actual library call only fires for BotType.RP.
     markdown_repairer = FormatStandartRpRepairer()
 
+    # TTS — opt-in: ``disabled`` (default) means no service at all,
+    # ``mock`` swaps in the in-process simulator, ``minimax`` hits
+    # the real T2A endpoint. Provider construction only happens on
+    # the active branches so a misconfigured key doesn't kill the
+    # chat pipeline (mirrors the chat LLM behaviour above).
+    tts_service: TTSService | None = None
+    if settings.tts_provider == "minimax":
+        try:
+            tts_provider = MiniMaxTTSProvider(settings=settings)
+        except ValueError:
+            logger.warning(
+                "TTS_PROVIDER=minimax but no TTS_API_KEY or LLM_API_KEY set; TTS will be disabled"
+            )
+            tts_provider = None
+        if tts_provider is not None:
+            tts_service = TTSService(
+                provider=tts_provider,
+                cache_dir=settings.effective_tts_cache_dir,
+                default_voice=settings.tts_voice_id,
+                default_model=settings.tts_model,
+            )
+    elif settings.tts_provider == "mock":
+        mock_provider = MockTTSProvider(settings=settings)
+        tts_service = TTSService(
+            provider=mock_provider,
+            cache_dir=settings.effective_tts_cache_dir,
+            default_voice=settings.tts_voice_id,
+            default_model=settings.tts_model,
+        )
+
     return ApplicationContainer(
         bots=BotService(bot_repo, bot_versions=bot_version_repo),
         threads=ThreadService(thread_repo, message_repo, bots=bot_repo),
@@ -137,6 +169,7 @@ def build_container(settings: Settings | None = None) -> ApplicationContainer:
         stale_embedding_bots=frozenset(stale_bots),
         markdown_repairer=markdown_repairer,
         settings=settings_svc,
+        tts=tts_service,
     )
 
 
@@ -171,6 +204,15 @@ async def startup_llms(container: ApplicationContainer) -> None:
             continue
         seen.add(id(llm))
         await llm.startup()
+    # TTS provider follows the same startup lifecycle so its httpx
+    # client is owned by the lifespan handler (no leak on shutdown).
+    # ``getattr`` because the lifespan hook only needs the methods
+    # when the provider actually has an httpx client to manage
+    # (the Mock provider's startup/close are no-ops).
+    if container.tts is not None:
+        startup = getattr(container.tts.provider, "startup", None)
+        if startup is not None:
+            await startup()
 
 
 async def shutdown_llms(container: ApplicationContainer) -> None:
@@ -201,6 +243,14 @@ async def shutdown_llms(container: ApplicationContainer) -> None:
             await llm.close()
         except Exception:
             pass
+    # Mirror startup: close the TTS provider if one was wired in.
+    if container.tts is not None:
+        close = getattr(container.tts.provider, "close", None)
+        if close is not None:
+            try:
+                await close()
+            except Exception:
+                pass
 
 
 async def init_container(settings: Settings | None = None) -> ApplicationContainer:

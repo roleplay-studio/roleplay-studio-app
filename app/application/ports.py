@@ -43,9 +43,7 @@ class SettingsRepository(Protocol):
         singleton row hasn't been created yet (caller should seed)."""
         ...
 
-    async def set_bot_categories(
-        self, categories: list[str], payload: str
-    ) -> None:
+    async def set_bot_categories(self, categories: list[str], payload: str) -> None:
         """Persist ``payload`` (already JSON-encoded) as the new
         ``bot_categories_json``. ``categories`` is passed alongside
         for repositories that prefer to encode internally; callers
@@ -492,4 +490,38 @@ class UploadedFile(Protocol):
 
     def read(self, size: int = -1) -> bytes:
         """Read up to ``size`` bytes; ``-1`` reads everything available."""
+        ...
+
+
+class TTSProvider(Protocol):
+    """Provider-agnostic text-to-speech synthesis.
+
+    Implementations wrap a specific HTTP API (MiniMax ``/v1/t2a_v2``,
+    OpenAI TTS, local Piper, etc.) and return raw audio bytes — usually
+    MP3, sometimes WAV. The :class:`TTSService` sits above this port and
+    owns caching, hashing, and the ``cache_id`` that the API route hands
+    to the client.
+
+    Failure modes: implementations MUST raise the framework-native
+    exception (``httpx.HTTPError``, ``RuntimeError``) on transport or
+    provider-side errors. ``TTSService`` rewraps these as
+    ``TTSError`` so callers never need to know about the underlying
+    transport.
+    """
+
+    async def synthesize(
+        self,
+        text: str,
+        voice_id: str,
+        model: str,
+        *,
+        speed: float = 1.0,
+    ) -> bytes:
+        """Synthesise ``text`` and return the raw audio bytes.
+
+        ``voice_id`` and ``model`` are opaque to the port — the service
+        passes through whatever the operator configured. ``speed`` is
+        a 0.5..2.0 multiplier that some providers accept; providers
+        that don't support it should ignore it (don't error).
+        """
         ...
