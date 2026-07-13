@@ -318,6 +318,8 @@ export interface Thread {
   created_at: null | string;
   id: number;
   name: string;
+  /** FK to the source thread (forks only). Null for root threads. */
+  parent_thread_id?: number | null;
   persona_id: null | number;
   persona_name: null | string;
   summary: null | string;
