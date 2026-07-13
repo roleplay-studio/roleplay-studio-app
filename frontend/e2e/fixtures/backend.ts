@@ -7,7 +7,7 @@
  * talks to it directly so we can seed data via real REST calls (no
  * fakes — see AGENTS.md §2 "fake repos mask bugs").
  */
-import { test as base, request as playwrightRequest, APIRequestContext } from '@playwright/test';
+import { APIRequestContext, test as base, request as playwrightRequest } from '@playwright/test';
 
 export type Backend = {
   api: APIRequestContext;
@@ -24,7 +24,7 @@ const BACKEND_PORT = 55245;
 const BACKEND_BASE = `http://127.0.0.1:${BACKEND_PORT}`;
 
 export const test = base.extend<{ backend: Backend }>({
-  backend: async ({ playwright }, use) => {
+  backend: async ({ playwright: _playwright }, use) => {
     const api = await playwrightRequest.newContext({ baseURL: BACKEND_BASE });
     const backend: Backend = {
       api,

@@ -53,6 +53,16 @@ export default [
     },
   },
   {
-    ignores: ['dist/', 'node_modules/', 'src-tauri/', '*.d.ts', '**/*.svelte.ts'],
+    ignores: [
+      'dist/',
+      'node_modules/',
+      'src-tauri/',
+      '*.d.ts',
+      '**/*.svelte.ts',
+      // Playwright trace HTML bundles — pre-compiled vendor JS, not project source
+      'playwright-report/',
+      // Playwright test runner output (screenshots, traces, last-run.json)
+      'test-results/',
+    ],
   },
 ];
