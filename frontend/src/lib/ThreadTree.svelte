@@ -48,11 +48,25 @@
     for (const node of byId.values()) {
       const parentId = node.thread.parent_thread_id;
       if (parentId != null && byId.has(parentId)) {
+        // Real fork — known parent exists in the list. Belongs as a
+        // child. ``flatten()`` later propagates depth from the
+        // parent's depth + 1.
         byId.get(parentId)!.children.push(node);
       } else {
+        // No parent OR parent isn't in the list (orphaned FK — keep
+        // visible rather than dropping data). Render as a root.
         roots.push(node);
       }
     }
+    // Propagate depth down the tree once children are assigned.
+    const assignDepth = (nodes: TreeNode[], depth: number): void => {
+      for (const n of nodes) {
+        n.depth = depth;
+        assignDepth(n.children, depth + 1);
+      }
+    };
+    assignDepth(roots, 0);
+
     // Sort children of each node by created_at ASC. Roots come
     // pre-sorted by the SQL ORDER BY (Task 3 changed list_for_bot
     // to ASC); re-sort defensively in case the caller passes an
@@ -76,19 +90,24 @@
   // info. Simpler than nested snippets; lets the {#each} key be
   // thread.id for clean DOM diffing.
   interface FlatRow {
+    depth: number;
     node: TreeNode;
     parentName: null | string;
   }
   function flatten(roots: TreeNode[]): FlatRow[] {
     const out: FlatRow[] = [];
-    const visit = (node: TreeNode, parentName: null | string): void => {
+    const visit = (
+      node: TreeNode,
+      depth: number,
+      parentName: null | string,
+    ): void => {
       const thisName = node.thread.name;
-      out.push({ node, parentName });
+      out.push({ depth, node, parentName });
       for (const child of node.children) {
-        visit(child, thisName);
+        visit(child, depth + 1, thisName);
       }
     };
-    for (const r of roots) visit(r, null);
+    for (const r of roots) visit(r, 0, null);
     return out;
   }
 
@@ -111,7 +130,7 @@
       <button
         class="tt-row"
         class:tt-active={selectedThreadId === thread.id}
-        style="--tt-depth: {row.node.depth};"
+        style="--tt-depth: {row.depth};"
         onclick={() => onselectThread(botId, thread.id ?? 0)}
         type="button"
       >
@@ -161,7 +180,10 @@
   .tt-list {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
+    /* Indent per depth level shared across the whole tree so the
+       connector bar lines up regardless of row height. */
+    --tt-indent: 18px;
   }
   .tt-row {
     display: flex;
@@ -169,7 +191,11 @@
     gap: 10px;
     width: 100%;
     padding: 8px 10px;
-    padding-left: calc(10px + var(--tt-depth, 0) * 20px);
+    padding-left: calc(10px + var(--tt-depth, 0) * var(--tt-indent));
+    /* Left border doubles as the tree trunk — drawn only on
+       children (depth ≥ 1) so root threads don't get a stub bar
+       sitting against the empty list margin. */
+    border-left: calc(var(--tt-depth, 0) * 1px) solid transparent;
     border: 1px solid var(--ray-border-card, rgba(0, 0, 0, 0.06));
     border-radius: 8px;
     background: var(--ray-surface, transparent);
@@ -178,6 +204,19 @@
     cursor: pointer;
     transition: background 0.12s ease;
     font: inherit;
+    position: relative;
+  }
+  /* Tiny L-shaped guide rendered before any non-root row. The
+     \`└\` glyph + a horizontal bar give the tree a familiar
+     file-explorer look without bringing in an icon set. */
+  .tt-row:not(.tt-depth-0)::before {
+    content: '';
+    position: absolute;
+    left: calc(var(--tt-depth, 0) * var(--tt-indent) - var(--tt-indent) + 6px);
+    top: 50%;
+    width: calc(var(--tt-indent) - 6px);
+    height: 1px;
+    background: var(--ray-border-card, rgba(0, 0, 0, 0.18));
   }
   .tt-row:hover {
     background: color-mix(in srgb, var(--ray-text, #000) 4%, transparent);
