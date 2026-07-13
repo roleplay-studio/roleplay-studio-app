@@ -13,6 +13,7 @@ the tests.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -100,18 +101,36 @@ async def test_base_resp_success_returns_audio(provider_settings: Settings) -> N
     await p.startup()
     try:
         # 4 hex bytes ("deadbeef") decoded = bytes([0xDE,0xAD,0xBE,0xEF]).
+        transport = _MockTransport(
+            200,
+            {
+                "base_resp": {"status_code": 0, "status_msg": ""},
+                "data": {"audio": "deadbeef", "status": 1},
+            },
+        )
         p._client = httpx.AsyncClient(
-            transport=_MockTransport(
-                200,
-                {
-                    "base_resp": {"status_code": 0, "status_msg": ""},
-                    "data": {"audio": "deadbeef", "status": 1},
-                },
-            ),
+            transport=transport,
             base_url="https://api.minimaxi.com/v1",
             timeout=httpx.Timeout(10.0),
         )
         result = await p.synthesize("hi", "Russian_ReliableMan", "speech-02-turbo")
         assert result == b"\xde\xad\xbe\xef"
+        # Contract: provider must POST to the documented sync HTTP
+        # endpoint and ask for hex-encoded audio. Without
+        # ``output_format=hex`` MiniMax's sync route may return a
+        # download URL instead of inline audio — which our parser
+        # cannot handle and falls into the "missing data.audio"
+        # branch. Locking the request shape prevents a future
+        # refactor from silently regressing the integration.
+        assert transport.last_request is not None
+        assert transport.last_request.url.path == "/v1/t2a_v2"
+        body = json.loads(transport.last_request.content)
+        assert body["output_format"] == "hex", (
+            f"sync MiniMax endpoint requires output_format=hex to return "
+            f"inline audio; got body={body!r}"
+        )
+        assert body["stream"] is False
+        assert body["voice_setting"]["voice_id"] == "Russian_ReliableMan"
+        assert body["audio_setting"]["format"] == "mp3"
     finally:
         await p.close()

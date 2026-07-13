@@ -151,7 +151,19 @@ class MiniMaxTTSProvider:
         body = {
             "model": model,
             "text": text,
+            # ``stream=false`` returns a single hex-encoded payload in
+            # ``data.audio``; ``stream=true`` switches to a download
+            # URL which we deliberately don't implement (would need
+            # a second hop + temp-file lifecycle).
             "stream": False,
+            # ``output_format=hex`` is the sync endpoint's switch for
+            # inline audio vs. an external download URL. Without it
+            # MiniMax returns ``{"data": {"audio": ""}}`` or a URL,
+            # and the parser below falls into
+            # "missing data.audio" — which historically confused
+            # operators into thinking the key was wrong. Locked here
+            # so a future refactor can't drop the flag.
+            "output_format": "hex",
             "voice_setting": {
                 "voice_id": voice_id,
                 "speed": float(speed),
