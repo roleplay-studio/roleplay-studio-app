@@ -256,12 +256,15 @@
       loading = true;
       loadBot(selectedBotId);
     } else {
+      // Switching FROM a bot TO the no-bot fallback view. Drop the
+      // per-bot state so the chat page leaves cleanly. crossBotThreads
+      // is NOT reset here — it gets refetched on the next mount via
+      // listRecentThreads().
       bot = null;
       threads = [];
       messages = [];
       selectedThreadId = null;
       threadStats = null;
-      crossBotThreads = [];
       loading = false;
     }
   });
