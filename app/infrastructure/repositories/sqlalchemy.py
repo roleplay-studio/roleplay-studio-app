@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
+from typing import Literal, cast
 
 from sqlalchemy import (
     delete as sa_delete,
@@ -337,10 +338,19 @@ class SqlAlchemyThreadRepository:
         self._store = store
 
     async def create(
-        self, bot_id: int, name: str = "Новая беседа", persona_id: int | None = None
+        self,
+        bot_id: int,
+        name: str = "Новая беседа",
+        persona_id: int | None = None,
+        parent_thread_id: int | None = None,
     ) -> int:
         async with self._store._async_session_factory() as session:
-            thread = ChatThread(bot_id=bot_id, name=name, persona_id=persona_id)
+            thread = ChatThread(
+                bot_id=bot_id,
+                name=name,
+                persona_id=persona_id,
+                parent_thread_id=parent_thread_id,
+            )
             session.add(thread)
             await session.commit()
             await session.refresh(thread)
@@ -359,6 +369,7 @@ class SqlAlchemyThreadRepository:
                 summary=thread.summary,
                 persona_id=thread.persona_id,
                 created_at=thread.created_at,
+                parent_thread_id=thread.parent_thread_id,
             )
 
     async def list_for_bot(self, bot_id: int) -> list[ThreadDTO]:
@@ -372,11 +383,12 @@ class SqlAlchemyThreadRepository:
                         t.summary,
                         t.persona_id,
                         p.name AS persona_name,
-                        t.created_at
+                        t.created_at,
+                        t.parent_thread_id
                     FROM chat_threads t
                     LEFT JOIN user_personas p ON t.persona_id = p.id
                     WHERE t.bot_id = :bot_id
-                    ORDER BY t.created_at DESC, t.id DESC
+                    ORDER BY t.created_at ASC, t.id ASC
                 """),
                 {"bot_id": bot_id},
             )
@@ -390,6 +402,7 @@ class SqlAlchemyThreadRepository:
                     persona_id=row.persona_id,
                     persona_name=row.persona_name,
                     created_at=row.created_at,
+                    parent_thread_id=row.parent_thread_id,
                 )
                 for row in rows
             ]
@@ -452,6 +465,7 @@ class SqlAlchemyThreadRepository:
                 summary=thread.summary,
                 persona_id=thread.persona_id,
                 created_at=thread.created_at,
+                parent_thread_id=thread.parent_thread_id,
             )
 
     async def set_pending_greeting(self, thread_id: int, content: str) -> None:
@@ -606,6 +620,7 @@ class SqlAlchemyMessageRepository:
         generation_status: str = "complete",
         reasoning: str | None = None,
         state: str | None = None,
+        dynamic_system_prompt: str | None = None,
     ) -> int | None:
         return await self.save(
             thread_id,
@@ -618,6 +633,7 @@ class SqlAlchemyMessageRepository:
             generation_status=generation_status,
             reasoning=reasoning,
             state=state,
+            dynamic_system_prompt=dynamic_system_prompt,
         )
 
     async def save_exchange(
@@ -690,7 +706,7 @@ class SqlAlchemyMessageRepository:
                 rows_result = await session.execute(
                     text(
                         f"SELECT id, thread_id, role, content, short_content, timestamp, "
-                        f"branch_group, branch_index, is_active "
+                        f"branch_group, branch_index, is_active, dynamic_system_prompt "
                         f"FROM conversations "
                         f"WHERE thread_id = :tid AND branch_group IN ({placeholders}) "
                         f"ORDER BY branch_index ASC"
@@ -715,6 +731,15 @@ class SqlAlchemyMessageRepository:
                             branch_group=bg,
                             branch_index=row.branch_index or 0,
                             is_active=bool(row.is_active),
+                            # Added in 0.0.6: read the floating-prompt
+                            # column through the raw-SQL branch path
+                            # too. Without this, regenerated branches
+                            # saved via ``save_branch`` lose the
+                            # snapshot on read because the SELECT
+                            # clause above never asked for the
+                            # column and ``MessageDTO`` defaults to
+                            # ``None`` on construction.
+                            dynamic_system_prompt=row.dynamic_system_prompt or None,
                         )
                     )
 
@@ -759,11 +784,77 @@ class SqlAlchemyMessageRepository:
             )
             await session.commit()
 
+    async def list_active_until(
+        self,
+        thread_id: int,
+        until_message_id: int,
+    ) -> list[MessageDTO]:
+        """Return active messages whose id <= ``until_message_id``, oldest first.
+
+        Implements the contract documented on
+        ``MessageRepository.list_active_until`` — same active-chain
+        filter as ``list_for_thread`` (rows with no ``branch_group``
+        plus the active row of any branch group). Used by
+        ``ThreadService.fork_at_message`` so the SQL filter is
+        byte-identical to the one the chat UI sees (pitfall 6at):
+        diverging filters here would silently drop messages the user
+        is currently looking at.
+
+        We deliberately do NOT call ``list_for_thread`` and trim in
+        Python — that path uses ``LIMIT`` and would miss older rows
+        once the chain grows past the page size. A targeted SELECT with
+        ``id <= until_message_id`` is both cheaper and correctness-
+        critical.
+
+        Returns an empty list for an unknown thread / an id that
+        doesn't belong to the thread; the service layer decides
+        whether that's an error.
+        """
+        async with self._store._async_session_factory() as session:
+            rows_result = await session.execute(
+                select(Conversation)
+                .where(
+                    Conversation.thread_id == thread_id,
+                    Conversation.id <= until_message_id,
+                    # Same filter as ``list_for_thread`` — keep these
+                    # two clauses in lockstep when the schema evolves.
+                    (Conversation.branch_group.is_(None)) | (Conversation.is_active.is_(True)),
+                )
+                .order_by(Conversation.id.asc())
+            )
+            rows = list(rows_result.scalars().all())
+            return [
+                MessageDTO(
+                    id=row.id,
+                    role=cast("Literal['system', 'user', 'assistant']", row.role),
+                    content=row.content,
+                    short_content=row.short_content,
+                    reasoning=row.reasoning,
+                    state=row.state,
+                    # ``dynamic_system_prompt`` is NOT NULL with
+                    # server_default='' — coerce the empty-string
+                    # default to ``None`` so the DTO matches what
+                    # ``list_for_thread`` emits (panel renders only
+                    # when a real value is present).
+                    dynamic_system_prompt=row.dynamic_system_prompt or None,
+                    created_at=_ensure_tz(row.timestamp),
+                    branch_group=None,
+                    branch_index=0,
+                    is_active=True,
+                    # Generation status is preserved per-row because
+                    # the fork snapshots the conversation as-is,
+                    # including any partial / streaming artefacts.
+                    generation_status=row.generation_status,
+                )
+                for row in rows
+                if row.content
+            ]
+
     async def count_active(self, thread_id: int) -> int:
         """Count the active chain of messages in ``thread_id``.
 
         Mirrors ``list_for_thread``'s branch-group filter: rows with
-        no branch_group plus the active row of any branch group.
+        no ``branch_group`` plus the active row of any branch group.
         Used by ``ThreadService.get_stats`` so the chat header reports
         total messages rather than the latest paginated window.
 
@@ -774,8 +865,7 @@ class SqlAlchemyMessageRepository:
             result = await session.execute(
                 select(func.count(Conversation.id)).where(
                     Conversation.thread_id == thread_id,
-                    (Conversation.branch_group.is_(None))
-                    | (Conversation.is_active.is_(True)),
+                    (Conversation.branch_group.is_(None)) | (Conversation.is_active.is_(True)),
                     Conversation.content.isnot(None) & (Conversation.content != ""),
                 )
             )
@@ -936,13 +1026,21 @@ class SqlAlchemyMessageRepository:
                     content=v.content,
                     short_content=v.short_content,
                     reasoning=v.reasoning,
+                    # 0.0.6 fix: ``get_versions`` built the DTO without
+                    # carrying over ``dynamic_system_prompt`` — the
+                    # column was saved by ``save_branch`` but the
+                    # read path silently dropped it, so the chat UI
+                    # never showed the floating-prompt panel for
+                    # regenerated branches. Mirror ``list_for_thread``
+                    # and propagate the column here too.
+                    dynamic_system_prompt=v.dynamic_system_prompt or None,
                     created_at=v.timestamp,
                     branch_group=v.branch_group,
                     branch_index=v.branch_index,
                     is_active=v.is_active,
                 )
                 for v in versions
-            ]
+            ]  # fmt: skip
 
     async def switch_version(self, branch_group: str, target_version_id: int) -> None:
         """Set target_version_id is_active=True, all others in branch_group=False."""
@@ -1448,7 +1546,6 @@ def _parse_categories(categories: str | list | None) -> list[str]:
         return []
 
 
-
 # ── Settings Repository ────────────────────────────────────────────
 
 
@@ -1477,9 +1574,7 @@ class SqlAlchemySettingsRepository:
                 return None
             return _parse_categories(row.bot_categories_json)
 
-    async def set_bot_categories(
-        self, categories: list[str], payload: str
-    ) -> None:
+    async def set_bot_categories(self, categories: list[str], payload: str) -> None:
         """Upsert the singleton row with the encoded JSON ``payload``.
 
         ``categories`` is passed alongside for repositories that

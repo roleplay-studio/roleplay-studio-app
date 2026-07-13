@@ -122,6 +122,8 @@ const GlobalDropZonesDemo = (): Promise<{ default: Component }> =>
 const NavItemsDemo = (): Promise<{ default: Component }> => import('../_demos/NavItemsDemo.svelte');
 const ThreadItemsDemo = (): Promise<{ default: Component }> =>
   import('../_demos/ThreadItemsDemo.svelte');
+const TTSButtonDemo = (): Promise<{ default: Component }> =>
+  import('../_demos/TTSButtonDemo.svelte');
 
 export const CATALOG: CatalogEntry[] = [
   {
@@ -2065,5 +2067,30 @@ export const CATALOG: CatalogEntry[] = [
     ],
     source: 'frontend/src/lib/GlobalDropZone.svelte',
     title: 'GlobalDropZone',
+  },
+  {
+    demo: TTSButtonDemo,
+    description:
+      'Per-message text-to-speech control (play / loading spinner / stop). Hidden when the backend returns 503 for /synthesize (TTS_PROVIDER=disabled). Cache id is reused across plays so re-listens do not re-charge the provider.',
+    group: 'composite',
+    props: [
+      {
+        description:
+          'Plain text to speak. Markdown metadata is stripped by the parent MessageBubble before this prop is set.',
+        name: 'content',
+        required: true,
+        type: 'string',
+      },
+    ],
+    slug: 'tts-button',
+    snippets: [
+      {
+        code: `<TTSButton content={msg.content} />`,
+        lang: 'svelte',
+        title: 'In MessageBubble',
+      },
+    ],
+    source: 'frontend/src/lib/ui/TTSButton.svelte',
+    title: 'TTSButton',
   },
 ];

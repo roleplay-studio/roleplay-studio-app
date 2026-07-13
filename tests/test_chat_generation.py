@@ -235,6 +235,9 @@ class BranchMessageRepo:
         timestamp=None,
         generation_status: str = "complete",
         reasoning: str | None = None,
+        # 0.0.6 — float prompt snapshot: regen tests don't read it,
+        # but the signature has to keep up with the real repo.
+        dynamic_system_prompt: str | None = None,
     ) -> int | None:
         return await self.save(
             thread_id,
@@ -351,9 +354,7 @@ class BranchMessageRepo:
             if e.msg.branch_group == branch_group:
                 e.msg.is_active = False
 
-    async def get_previous_assistant_state(
-        self, thread_id, before_message_id=None
-    ) -> str:
+    async def get_previous_assistant_state(self, thread_id, before_message_id=None) -> str:
         """Mirrors the SQL contract — the most recent assistant's state
         strictly before ``before_message_id`` (or any if None).
 
@@ -361,12 +362,12 @@ class BranchMessageRepo:
         MessageRepository Protocol when used with ChatService.
         """
         candidates = [
-            e.msg for e in self._msgs
+            e.msg
+            for e in self._msgs
             if e.msg.role == "assistant"
             and e.msg.state
             and (
-                before_message_id is None
-                or (e.msg.id is not None and e.msg.id < before_message_id)
+                before_message_id is None or (e.msg.id is not None and e.msg.id < before_message_id)
             )
         ]
         candidates.sort(key=lambda m: m.id or 0, reverse=True)

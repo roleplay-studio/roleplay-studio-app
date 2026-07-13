@@ -53,7 +53,8 @@ const dict: LangDict = Object.freeze({
     'bot_edit.description_hint': 'Kurzbeschreibung in Karten',
     'bot_edit.description_placeholder': 'Eine fröhliche Catgirl, das Anime und Technik liebt...',
     'bot_edit.dynamic_system_prompt': 'Schwebende Systemanweisung',
-    'bot_edit.dynamic_system_prompt_hint': 'Wird vor der letzten Nutzernachricht eingefügt. {{char}}/{{user}} werden ersetzt.',
+    'bot_edit.dynamic_system_prompt_hint':
+      'Wird vor der letzten Nutzernachricht eingefügt. {{char}}/{{user}} werden ersetzt.',
     'bot_edit.edit_cancel': 'Abbrechen',
     'bot_edit.edit_save': 'Speichern',
     'bot_edit.enter_knowledge': 'Wissensinhalt eingeben...',
@@ -87,7 +88,8 @@ const dict: LangDict = Object.freeze({
     'bot_edit.personality': 'Persönlichkeit',
     'bot_edit.personality_placeholder': 'Beschreibe die Persönlichkeit des Bots...',
     'bot_edit.preview_toggle': 'Vorschau',
-    'bot_edit.prompts_intro': 'Steuert das Langzeit-Verhalten: Erinnerungen, die bei jeder Nachricht frisch eingespeist werden, und strukturierte Weltzustände, die im Hintergrund laufen.',
+    'bot_edit.prompts_intro':
+      'Steuert das Langzeit-Verhalten: Erinnerungen, die bei jeder Nachricht frisch eingespeist werden, und strukturierte Weltzustände, die im Hintergrund laufen.',
     'bot_edit.save': 'Änderungen speichern',
     'bot_edit.scenario': 'Szenario',
     'bot_edit.scenario_hint': 'Welt- / Ortsbeschreibung',
@@ -273,7 +275,8 @@ const dict: LangDict = Object.freeze({
     'edit_message.state_placeholder': 'Welt: Wetter, Ort, Fakten …',
 
     'edit_message.tab_state': 'Welt',
-    'edit_message.tab_message': 'Nachricht',    'feature.android.desc': 'Nativer mobiler Client (in Arbeit)',
+    'edit_message.tab_message': 'Nachricht',
+    'feature.android.desc': 'Nativer mobiler Client (in Arbeit)',
     'feature.android.title': 'Tauri Android',
     'feature.bots.desc': 'Charaktere mit Personas erstellen',
     'feature.bots.title': 'Eigene Bots',
@@ -319,6 +322,10 @@ const dict: LangDict = Object.freeze({
     'message.previous_version': 'Vorherige Version',
     'message.regenerate': 'Neu generieren',
     'message.retry': 'Erneut senden',
+    'message.tts_play': 'Anhören',
+    'message.tts_stop': 'Stopp',
+    'message.tts_loading': 'Wird synthetisiert…',
+    'message.tts_error': 'TTS fehlgeschlagen',
     'nav.bots': 'Bot-Studio',
     'nav.chat': 'Chat',
     'nav.dashboard': 'Dashboard',
@@ -448,6 +455,8 @@ const dict: LangDict = Object.freeze({
     'settings.tab_knowledge': 'Wissensdatenbank',
     'settings.tab_knowledge_hint': 'RAG-Embedding-Modell, Endpunkt und Suchschwelle',
     'settings.tab_memory': 'Speicher',
+    'settings.tab_tts': 'Sprachausgabe',
+    'settings.tab_tts_hint': 'TTS-Provider, Stimme und Cache für die Wiedergabe von Nachrichten',
     'settings.temperature': 'Temperatur',
     'settings.temperature_hint': 'Niedriger = fokussiert, höher = kreativ',
     'settings.test_connection': 'Verbindung testen',
@@ -608,7 +617,8 @@ const dict: LangDict = Object.freeze({
     'bot_edit.description_hint': 'Short summary shown in cards',
     'bot_edit.description_placeholder': 'A cheerful catgirl who loves anime and tech...',
     'bot_edit.dynamic_system_prompt': 'Floating system prompt',
-    'bot_edit.dynamic_system_prompt_hint': 'Injected before the last user message. {{char}}/{{user}} are substituted.',
+    'bot_edit.dynamic_system_prompt_hint':
+      'Injected before the last user message. {{char}}/{{user}} are substituted.',
     'bot_edit.edit_cancel': 'Cancel',
     'bot_edit.edit_save': 'Save',
     'bot_edit.enter_knowledge': 'Enter knowledge content...',
@@ -658,7 +668,8 @@ const dict: LangDict = Object.freeze({
     'bot_edit.personality': 'Personality',
     'bot_edit.personality_placeholder': "Describe the bot's personality...",
     'bot_edit.preview_toggle': 'Preview',
-    'bot_edit.prompts_intro': 'Tune long-chat behaviour: floating reminders re-injected every turn, and structured world-state snapshots that update in the background.',
+    'bot_edit.prompts_intro':
+      'Tune long-chat behaviour: floating reminders re-injected every turn, and structured world-state snapshots that update in the background.',
     'bot_edit.save': 'Save Changes',
     'bot_edit.scenario': 'Scenario',
     'bot_edit.scenario_hint': 'World / setting description',
@@ -790,6 +801,11 @@ const dict: LangDict = Object.freeze({
     'chat.summary_active': 'Thread summary active (re-summarize)',
     'chat.threads': 'Threads',
     'chat.threads_count': '{n} threads',
+    'chat.tree.empty': 'No chats yet — start a conversation to see it here.',
+    'chat.tree.fork_badge': 'Fork',
+    'chat.tree.forked_from': 'from {parent_name}',
+    'chat.tree.has_forks': '{n, plural, one {# fork} other {# forks}}',
+    'chat.tree.title': 'Thread tree',
     'chat.type_message': 'Type your message...',
     'chat.typing': 'is typing...',
     'chat.upload_failed': 'Upload failed',
@@ -890,13 +906,22 @@ const dict: LangDict = Object.freeze({
     'message.debug': 'Debug payload',
     'message.delete': 'Delete',
     'message.edit': 'Edit',
+    'message.fork': 'Fork from here',
+    'message.fork_failed': 'Could not fork chat: {detail}',
+    'message.fork_not_found': 'Message is no longer in the active chain.',
+    'message.fork_started': 'Forked chat created — opening…',
     'message.menu.copied': 'Copied!',
     'message.menu.copy': 'Copy',
     'message.menu.edit': 'Edit',
+    'message.menu.fork': 'Fork from here',
     'message.next_version': 'Next version',
     'message.previous_version': 'Previous version',
     'message.regenerate': 'Regenerate',
     'message.retry': 'Resend',
+    'message.tts_play': 'Listen',
+    'message.tts_stop': 'Stop',
+    'message.tts_loading': 'Synthesising…',
+    'message.tts_error': 'TTS failed',
     'nav.bots': 'Bot Studio',
     'nav.chat': 'Recent Chats',
     'nav.dashboard': 'Dashboard',
@@ -1011,6 +1036,8 @@ const dict: LangDict = Object.freeze({
     'settings.tab_knowledge': 'Knowledge base',
     'settings.tab_knowledge_hint': 'RAG embedding model, endpoint, and search threshold',
     'settings.tab_memory': 'Memory',
+    'settings.tab_tts': 'Speech',
+    'settings.tab_tts_hint': 'TTS provider, voice, and cache for message playback',
     'settings.temperature': 'Temperature',
     'settings.temperature_hint': 'Lower = focused, higher = creative',
     'settings.test_connection': 'Test Connection',
@@ -1155,7 +1182,8 @@ const dict: LangDict = Object.freeze({
     'bot_edit.description_hint': 'Court résumé affiché dans les fiches',
     'bot_edit.description_placeholder': 'Une chatte joyeuse qui adore les anime et la tech...',
     'bot_edit.dynamic_system_prompt': 'Consigne système flottante',
-    'bot_edit.dynamic_system_prompt_hint': 'Insérée avant le dernier message utilisateur. {{char}}/{{user}} sont substitués.',
+    'bot_edit.dynamic_system_prompt_hint':
+      'Insérée avant le dernier message utilisateur. {{char}}/{{user}} sont substitués.',
     'bot_edit.edit_cancel': 'Annuler',
     'bot_edit.edit_save': 'Enregistrer',
     'bot_edit.enter_knowledge': 'Saisissez le contenu de la connaissance...',
@@ -1190,7 +1218,8 @@ const dict: LangDict = Object.freeze({
     'bot_edit.personality': 'Personnalité',
     'bot_edit.personality_placeholder': 'Décrivez la personnalité du bot...',
     'bot_edit.preview_toggle': 'Aperçu',
-    'bot_edit.prompts_intro': 'Règle le comportement sur la durée : rappels réinjectés à chaque tour, et instantanés d\u2019état du monde mis à jour en arrière-plan.',
+    'bot_edit.prompts_intro':
+      'Règle le comportement sur la durée : rappels réinjectés à chaque tour, et instantanés d\u2019état du monde mis à jour en arrière-plan.',
     'bot_edit.save': 'Enregistrer les modifications',
     'bot_edit.scenario': 'Scénario',
     'bot_edit.scenario_hint': 'Description du monde / décor',
@@ -1426,6 +1455,10 @@ const dict: LangDict = Object.freeze({
     'message.previous_version': 'Version précédente',
     'message.regenerate': 'Régénérer',
     'message.retry': 'Renvoyer',
+    'message.tts_play': 'Écouter',
+    'message.tts_stop': 'Arrêter',
+    'message.tts_loading': 'Synthèse…',
+    'message.tts_error': 'Échec TTS',
     'nav.bots': 'Studio de bots',
     'nav.chat': 'Chat',
     'nav.dashboard': 'Tableau de bord',
@@ -1555,6 +1588,8 @@ const dict: LangDict = Object.freeze({
     'settings.tab_knowledge': 'Base de connaissances',
     'settings.tab_knowledge_hint': "Modèle d\\'embedding RAG, endpoint et seuil de recherche",
     'settings.tab_memory': 'Mémoire',
+    'settings.tab_tts': 'Synthèse vocale',
+    'settings.tab_tts_hint': 'Fournisseur TTS, voix et cache pour la lecture des messages',
     'settings.temperature': 'Température',
     'settings.temperature_hint': 'Bas = concentré, haut = créatif',
     'settings.test_connection': 'Tester la connexion',
@@ -1716,7 +1751,8 @@ const dict: LangDict = Object.freeze({
     'bot_edit.description_hint': 'カードに表示される簡単な説明',
     'bot_edit.description_placeholder': 'アニメとテクノロジーが大好きな元気な猫耳娘...',
     'bot_edit.dynamic_system_prompt': 'フローティングシステムプロンプト',
-    'bot_edit.dynamic_system_prompt_hint': '最後のユーザーメッセージの前に挿入されます。{{char}}/{{user}}は置換されます。',
+    'bot_edit.dynamic_system_prompt_hint':
+      '最後のユーザーメッセージの前に挿入されます。{{char}}/{{user}}は置換されます。',
     'bot_edit.edit_cancel': 'キャンセル',
     'bot_edit.edit_save': '保存',
     'bot_edit.enter_knowledge': 'ナレッジ内容を入力...',
@@ -1750,7 +1786,8 @@ const dict: LangDict = Object.freeze({
     'bot_edit.personality': '性格',
     'bot_edit.personality_placeholder': 'ボットの性格を説明してください...',
     'bot_edit.preview_toggle': 'プレビュー',
-    'bot_edit.prompts_intro': '長期チャットの挙動を調整：毎ターン再注入されるリマインダーと、バックグラウンドで更新されるワールドステートのスナップショット。',
+    'bot_edit.prompts_intro':
+      '長期チャットの挙動を調整：毎ターン再注入されるリマインダーと、バックグラウンドで更新されるワールドステートのスナップショット。',
     'bot_edit.save': '変更を保存',
     'bot_edit.scenario': 'シナリオ',
     'bot_edit.scenario_hint': '世界観・設定の説明',
@@ -1981,6 +2018,10 @@ const dict: LangDict = Object.freeze({
     'message.previous_version': '前のバージョン',
     'message.regenerate': '再生成',
     'message.retry': '再送信',
+    'message.tts_play': '再生',
+    'message.tts_stop': '停止',
+    'message.tts_loading': '合成中…',
+    'message.tts_error': 'TTS に失敗しました',
     'nav.bots': 'ボット管理',
     'nav.chat': 'チャット',
     'nav.dashboard': 'ダッシュボード',
@@ -2104,6 +2145,8 @@ const dict: LangDict = Object.freeze({
     'settings.tab_knowledge': 'ナレッジベース',
     'settings.tab_knowledge_hint': 'RAG埋め込みモデル、エンドポイント、検索閾値',
     'settings.tab_memory': 'メモリ',
+    'settings.tab_tts': '音声合成',
+    'settings.tab_tts_hint': 'メッセージ再生用のTTSプロバイダー、ボイス、キャッシュ',
     'settings.temperature': '温度',
     'settings.temperature_hint': '低い = 集中、高い = 創造的',
     'settings.test_connection': '接続をテスト',
@@ -2261,7 +2304,8 @@ const dict: LangDict = Object.freeze({
     'bot_edit.description_hint': '카드에 표시되는 짧은 요약',
     'bot_edit.description_placeholder': '애니메이션과 기술을 좋아하는 밝은 고양이 소녀...',
     'bot_edit.dynamic_system_prompt': '플로팅 시스템 프롬프트',
-    'bot_edit.dynamic_system_prompt_hint': '마지막 사용자 메시지 앞에 삽입됩니다. {{char}}/{{user}}는 치환됩니다.',
+    'bot_edit.dynamic_system_prompt_hint':
+      '마지막 사용자 메시지 앞에 삽입됩니다. {{char}}/{{user}}는 치환됩니다.',
     'bot_edit.edit_cancel': '취소',
     'bot_edit.edit_save': '저장',
     'bot_edit.enter_knowledge': '지식 내용을 입력하세요...',
@@ -2294,7 +2338,8 @@ const dict: LangDict = Object.freeze({
     'bot_edit.personality': '성격',
     'bot_edit.personality_placeholder': '봇의 성격을 설명하세요...',
     'bot_edit.preview_toggle': '미리보기',
-    'bot_edit.prompts_intro': '긴 대화 동작을 조정: 매 턴마다 다시 주입되는 리마인더와 백그라운드에서 업데이트되는 세계 상태 스냅샷.',
+    'bot_edit.prompts_intro':
+      '긴 대화 동작을 조정: 매 턴마다 다시 주입되는 리마인더와 백그라운드에서 업데이트되는 세계 상태 스냅샷.',
     'bot_edit.save': '변경 사항 저장',
     'bot_edit.scenario': '시나리오',
     'bot_edit.scenario_hint': '세계관 / 배경 설명',
@@ -2478,7 +2523,8 @@ const dict: LangDict = Object.freeze({
     'edit_message.state_placeholder': '월드: 날씨, 장소, 사실…',
 
     'edit_message.tab_state': '월드',
-    'edit_message.tab_message': '메시지',    'feature.android.desc': '네이티브 모바일 클라이언트 (개발 중)',
+    'edit_message.tab_message': '메시지',
+    'feature.android.desc': '네이티브 모바일 클라이언트 (개발 중)',
     'feature.android.title': 'Tauri Android',
     'feature.bots.desc': '페르소나로 캐릭터 만들기',
     'feature.bots.title': '커스텀 봇',
@@ -2524,6 +2570,10 @@ const dict: LangDict = Object.freeze({
     'message.previous_version': '이전 버전',
     'message.regenerate': '재생성',
     'message.retry': '다시 보내기',
+    'message.tts_play': '듣기',
+    'message.tts_stop': '정지',
+    'message.tts_loading': '합성 중…',
+    'message.tts_error': 'TTS 실패',
     'nav.bots': '봇 스튜디오',
     'nav.chat': '채팅',
     'nav.dashboard': '대시보드',
@@ -2646,6 +2696,8 @@ const dict: LangDict = Object.freeze({
     'settings.tab_knowledge': '지식 베이스',
     'settings.tab_knowledge_hint': 'RAG 임베딩 모델, 엔드포인트, 검색 임계값',
     'settings.tab_memory': '메모리',
+    'settings.tab_tts': '음성 합성',
+    'settings.tab_tts_hint': '메시지 재생용 TTS 제공자, 음성, 캐시',
     'settings.temperature': '온도',
     'settings.temperature_hint': '낮을수록 집중, 높을수록 창의적',
     'settings.test_connection': '연결 테스트',
@@ -2801,7 +2853,8 @@ const dict: LangDict = Object.freeze({
     'bot_edit.description_hint': 'Краткое описание для карточки',
     'bot_edit.description_placeholder': 'Весёлая кошкодевочка, любит аниме и технологии...',
     'bot_edit.dynamic_system_prompt': 'Плавающий системный промпт',
-    'bot_edit.dynamic_system_prompt_hint': 'Вставляется перед последним сообщением пользователя. {{char}}/{{user}} подставляются.',
+    'bot_edit.dynamic_system_prompt_hint':
+      'Вставляется перед последним сообщением пользователя. {{char}}/{{user}} подставляются.',
     'bot_edit.edit_cancel': 'Отмена',
     'bot_edit.edit_save': 'Сохранить',
     'bot_edit.enter_knowledge': 'Введите содержимое...',
@@ -2852,7 +2905,8 @@ const dict: LangDict = Object.freeze({
     'bot_edit.personality': 'Характер (system prompt)',
     'bot_edit.personality_placeholder': 'Опишите характер бота...',
     'bot_edit.preview_toggle': 'Предпросмотр',
-    'bot_edit.prompts_intro': 'Управляют долгосрочным поведением бота: напоминания, повторно вставляемые в каждый ход, и снимки состояния мира, обновляемые в фоне.',
+    'bot_edit.prompts_intro':
+      'Управляют долгосрочным поведением бота: напоминания, повторно вставляемые в каждый ход, и снимки состояния мира, обновляемые в фоне.',
     'bot_edit.save': 'Сохранить',
     'bot_edit.scenario': 'Мир (scenario)',
     'bot_edit.scenario_hint': 'Описание мира / сеттинга',
@@ -3050,7 +3104,8 @@ const dict: LangDict = Object.freeze({
     'edit_message.state_placeholder': 'мир: погода, локация, факты…',
 
     'edit_message.tab_state': 'Мир',
-    'edit_message.tab_message': 'Сообщение',    'feature.android.desc': 'Нативный клиент для Windows, MacOS, Android',
+    'edit_message.tab_message': 'Сообщение',
+    'feature.android.desc': 'Нативный клиент для Windows, MacOS, Android',
     'feature.android.title': 'Нативное приложение',
     'feature.bots.desc': 'Создавай любимых персонажей и целые сказочные миры',
     'feature.bots.title': 'Персонажи и ассистенты',
@@ -3096,6 +3151,10 @@ const dict: LangDict = Object.freeze({
     'message.previous_version': 'Предыдущая версия',
     'message.regenerate': 'Перегенерировать',
     'message.retry': 'Переотправить',
+    'message.tts_play': 'Озвучить',
+    'message.tts_stop': 'Остановить',
+    'message.tts_loading': 'Синтез…',
+    'message.tts_error': 'Ошибка синтеза',
     'nav.bots': 'Боты',
     'nav.chat': 'Недавние чаты',
     'nav.dashboard': 'Список ботов',
@@ -3213,6 +3272,8 @@ const dict: LangDict = Object.freeze({
     'settings.tab_knowledge': 'База знаний',
     'settings.tab_knowledge_hint': 'Модель эмбеддингов RAG, эндпоинт и порог поиска',
     'settings.tab_memory': 'Память',
+    'settings.tab_tts': 'Озвучка',
+    'settings.tab_tts_hint': 'Провайдер TTS, голос и кеш для воспроизведения сообщений',
     'settings.temperature': 'Температура',
     'settings.temperature_hint': 'Низкая = точнее, высокая = креативнее',
     'settings.test_connection': 'Проверить соединение',
@@ -3566,13 +3627,13 @@ const dict: LangDict = Object.freeze({
     'edit_message.placeholder': '编辑消息内容……',
     'edit_message.save': '保存',
     'edit_message.title': '✏️ 编辑消息',
-    'edit_message.state_hint':
-      '助手在本回合写入的世界状态快照。在下游回合看到之前编辑以改写世界。',
+    'edit_message.state_hint': '助手在本回合写入的世界状态快照。在下游回合看到之前编辑以改写世界。',
     'edit_message.state_label': '世界状态',
     'edit_message.state_placeholder': '世界：天气、地点、事实…',
 
     'edit_message.tab_state': '世界',
-    'edit_message.tab_message': '消息',    'feature.android.desc': '原生移动客户端（开发中）',
+    'edit_message.tab_message': '消息',
+    'feature.android.desc': '原生移动客户端（开发中）',
     'feature.android.title': 'Tauri Android',
     'feature.bots.desc': '基于人设构建角色',
     'feature.bots.title': '自定义 Bot',
@@ -3617,6 +3678,10 @@ const dict: LangDict = Object.freeze({
     'message.previous_version': '上一版本',
     'message.regenerate': '重新生成',
     'message.retry': '重新发送',
+    'message.tts_play': '朗读',
+    'message.tts_stop': '停止',
+    'message.tts_loading': '合成中…',
+    'message.tts_error': 'TTS 失败',
     'nav.bots': '机器人工作室',
     'nav.chat': '聊天',
     'nav.dashboard': '仪表盘',
@@ -3732,6 +3797,8 @@ const dict: LangDict = Object.freeze({
     'settings.tab_knowledge': '知识库',
     'settings.tab_knowledge_hint': 'RAG 嵌入模型、端点与搜索阈值',
     'settings.tab_memory': '记忆',
+    'settings.tab_tts': '语音合成',
+    'settings.tab_tts_hint': '消息播放的 TTS 提供方、语音与缓存',
     'settings.temperature': '温度',
     'settings.temperature_hint': '越低越精确，越高越有创意',
     'settings.test_connection': '测试连接',
@@ -3869,5 +3936,84 @@ export function t(key: string, lang: string, vars?: Record<string, number | stri
   const value = raw === undefined && lang !== 'en' ? dict.en[key] : raw;
   if (value === undefined) return key;
   if (!vars) return value;
-  return value.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? `{${k}}`));
+  return interpolateIcu(value, vars, lang);
+}
+
+/**
+ * Minimal ICU MessageFormat support: handles ``{name}`` (plain var)
+ * and ``{n, plural, one {singular} other {plural}`` … ``}`` (plural
+ * with ``#`` as the count placeholder inside the branches).
+ *
+ * This is a deliberate subset — the project ships 6 ICU strings
+ * (reindex.banner_body + chat.tree.has_forks) and a full IntlMessageFormat
+ * dependency is overkill. Falls back gracefully on syntax errors.
+ */
+function interpolateIcu(
+  template: string,
+  vars: Record<string, number | string>,
+  lang: string,
+): string {
+  // Step 1: handle ``{name}`` — simple var replacement.
+  // Step 2: handle ``{n, plural, one {X} other {Y}…}`` — recursive
+  //   matching of nested braces for each plural branch.
+  let out = template.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? `{${k}}`));
+  // Plural form: {n, plural, one {A} other {B}}
+  out = out.replace(
+    /\{(\w+),\s*plural,\s*((?:one|other|few|many|\w+)\s*\{[^}]*\}(?:\s*(?:one|other|few|many|\w+)\s*\{[^}]*\})*)\s*\}/g,
+    (_match, name: string, body: string) => {
+      const n = Number(vars[name] ?? 0);
+      const cat = pluralCategory(n, lang);
+      // Find the branch matching cat (or 'other' as fallback).
+      const branches = parsePluralBranches(body);
+      const branchText =
+        branches[cat] ?? branches['other'] ?? branches['one'] ?? '';
+      // Replace ``#`` with the actual count inside the chosen branch.
+      return branchText.replace(/#/g, String(n));
+    },
+  );
+  return out;
+}
+
+/** Parse ``one {A} other {B} few {C}`` → ``{ one: 'A', other: 'B', few: 'C' }``. */
+function parsePluralBranches(body: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  // Match each ``<category> {<text>}`` — text may contain braces so
+  // we only match the outermost braces by scanning brace depth.
+  const re = /\b(one|other|few|many|two)\s*\{/g;
+  let m: null | RegExpExecArray;
+  while ((m = re.exec(body)) !== null) {
+    const cat = m[1];
+    const start = re.lastIndex; // after the '{'
+    // Find matching closing brace.
+    let depth = 1;
+    let i = start;
+    while (i < body.length && depth > 0) {
+      const c = body[i];
+      if (c === '{') depth++;
+      else if (c === '}') depth--;
+      i++;
+    }
+    if (depth === 0) {
+      out[cat] = body.slice(start, i - 1);
+    } else {
+      // Unbalanced — bail.
+      break;
+    }
+  }
+  return out;
+}
+
+/** Return the plural category for ``n`` in ``lang``.
+ *
+ * Uses ``Intl.PluralRules`` (available in all evergreen browsers +
+ * Node 18+) when present. Falls back to a simple n===1 check for
+ * environments without Intl support.
+ */
+function pluralCategory(n: number, lang: string): string {
+  try {
+    const rules = new Intl.PluralRules(lang);
+    return rules.select(n);
+  } catch {
+    return n === 1 ? 'one' : 'other';
+  }
 }

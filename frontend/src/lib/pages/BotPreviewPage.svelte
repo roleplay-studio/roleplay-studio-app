@@ -1,9 +1,10 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
 
-  import { api, API_BASE, type Bot, type Persona, type RecentThread, thumbUrl } from '../api';
+  import { api, API_BASE, type Bot, type Persona, type Thread } from '../api';
   import { currentLang, t } from '../i18n';
   import PersonaSelectModal from '../PersonaSelectModal.svelte';
+  import ThreadTree from '../ThreadTree.svelte';
   import { GeneratedAvatar, Loading } from '../ui';
 
   const { botId = '0' }: { botId?: string } = $props();
@@ -12,7 +13,7 @@
   let bot: Bot | null = $state(null);
   let loading = $state(true);
   let showPersonaModal = $state(false);
-  let recentThreads: RecentThread[] = $state([]);
+  let recentThreads: Thread[] = $state([]);
   let unsubLang: (() => void) | undefined;
 
   // Import state
@@ -27,21 +28,6 @@
     return `${API_BASE}${path}`;
   }
 
-  function timeAgo(dateStr: null | string): string {
-    if (!dateStr) return '';
-    const d = new Date(dateStr);
-    const now = Date.now();
-    const diff = now - d.getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return 'just now';
-    if (mins < 60) return `${mins}m ago`;
-    const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs}h ago`;
-    const days = Math.floor(hrs / 24);
-    if (days < 7) return `${days}d ago`;
-    return d.toLocaleDateString();
-  }
-
   let personas: Persona[] = $state([]);
 
   onMount(async () => {
@@ -52,7 +38,7 @@
         const [b, personaList, threads] = await Promise.all([
           api.getBot(id),
           api.listPersonas(),
-          api.listRecentThreads(5, id),
+          api.listBotThreads(id),
         ]);
         bot = b;
         personas = personaList;
@@ -253,38 +239,16 @@
       </div>
     </div>
 
-    <!-- Recent chats -->
+    <!-- Recent chats — thread tree (roots + indented forks) -->
     {#if recentThreads.length > 0}
       <div class="bp-recent">
-        <h2 class="bp-recent-title">{t('chat.recent.title', lang)}</h2>
-        <div class="bp-recent-list">
-          {#each recentThreads as thread (thread.thread_id)}
-            <button class="bp-recent-item" onclick={() => openThread(thread.thread_id)}>
-              <div class="bp-recent-avatar">
-                {#if thread.persona_avatar_path}
-                  <img src={thumbUrl(thread.persona_avatar_path, 50)} alt="" />
-                {:else}
-                  <div class="bp-recent-avatar-ph">
-                    {(thread.persona_name || '?').charAt(0).toUpperCase()}
-                  </div>
-                {/if}
-              </div>
-              <div class="bp-recent-info">
-                <span class="bp-recent-persona"
-                  >{thread.persona_name || t('chat.persona_none', lang)}</span
-                >
-                <span class="bp-recent-preview" class:bp-recent-summary={!!thread.summary}>
-                  {#if thread.summary}
-                    {thread.summary}
-                  {:else}
-                    {thread.last_message_preview}
-                  {/if}
-                </span>
-              </div>
-              <span class="bp-recent-time">{timeAgo(thread.last_message_at)}</span>
-            </button>
-          {/each}
-        </div>
+        <h2 class="bp-recent-title">{t('chat.tree.title', lang)}</h2>
+        <ThreadTree
+          threads={recentThreads}
+          onselectThread={(_, threadId) => openThread(threadId)}
+          botId={bot?.id ?? 0}
+          {lang}
+        />
       </div>
     {/if}
   {/if}

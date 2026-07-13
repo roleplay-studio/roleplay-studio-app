@@ -159,6 +159,9 @@ class FakeMessageRepo:
         branch_index,
         timestamp=None,
         generation_status: str = "complete",
+        # 0.0.6 — float prompt snapshot, signature aligned with
+        # the real ``MessageRepository.save_branch``.
+        dynamic_system_prompt: str | None = None,
     ):
         return await self.save(
             thread_id,

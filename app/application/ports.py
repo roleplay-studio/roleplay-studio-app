@@ -43,9 +43,7 @@ class SettingsRepository(Protocol):
         singleton row hasn't been created yet (caller should seed)."""
         ...
 
-    async def set_bot_categories(
-        self, categories: list[str], payload: str
-    ) -> None:
+    async def set_bot_categories(self, categories: list[str], payload: str) -> None:
         """Persist ``payload`` (already JSON-encoded) as the new
         ``bot_categories_json``. ``categories`` is passed alongside
         for repositories that prefer to encode internally; callers
@@ -113,7 +111,8 @@ class BotRepository(Protocol):
 
 class ThreadRepository(Protocol):
     async def create(
-        self, bot_id: int, name: str = "new chat", persona_id: int | None = None
+        self, bot_id: int, name: str = "new chat", persona_id: int | None = None,
+        parent_thread_id: int | None = None,
     ) -> int: ...
 
     async def get(self, thread_id: int) -> ThreadDTO | None: ...
@@ -191,6 +190,33 @@ class MessageRepository(Protocol):
         before_id: int | None = None,
     ) -> list[MessageDTO]: ...
 
+    async def list_active_until(
+        self,
+        thread_id: int,
+        until_message_id: int,
+    ) -> list[MessageDTO]:
+        """Return the active chain of messages in ``thread_id`` whose id is
+        less than or equal to ``until_message_id``, ordered oldest-first.
+
+        Mirrors the active-chain filter used by ``list_for_thread``
+        (rows with no ``branch_group`` plus the active row of any branch
+        group). Used by ``ThreadService.fork_at_message`` to assemble a
+        snapshot of the conversation up to the message the user forked
+        from — both endpoints MUST agree on the same filter, or the
+        fork would silently drop messages the chat UI is showing.
+
+        Implementations must:
+
+        * Filter ``thread_id == tid AND id <= until_message_id AND
+          (branch_group IS NULL OR is_active)``.
+        * Order ``id ASC`` so the caller can persist messages in
+          chronological order into the new thread without re-sorting.
+        * Return an empty list (not raise) when the thread has no
+          qualifying rows or the ``until_message_id`` doesn't belong to
+          the thread — the caller decides whether that's an error.
+        """
+        ...
+
     async def count_active(self, thread_id: int) -> int:
         """Count the active chain of messages in ``thread_id``.
 
@@ -262,6 +288,11 @@ class MessageRepository(Protocol):
         # edits don't silently drop the world-state context the user
         # was looking at when they decided to edit.
         state: str | None = None,
+        # Floating system-prompt snapshot the LLM received on this
+        # turn. Stamped so the chat UI can render the "what was sent"
+        # panel on regenerated messages too, matching the contract on
+        # ``save``. ``None`` = no floating prompt was injected.
+        dynamic_system_prompt: str | None = None,
     ) -> int | None:
         """Save a message with explicit branch group."""
         ...
@@ -492,4 +523,38 @@ class UploadedFile(Protocol):
 
     def read(self, size: int = -1) -> bytes:
         """Read up to ``size`` bytes; ``-1`` reads everything available."""
+        ...
+
+
+class TTSProvider(Protocol):
+    """Provider-agnostic text-to-speech synthesis.
+
+    Implementations wrap a specific HTTP API (MiniMax ``/v1/t2a_v2``,
+    OpenAI TTS, local Piper, etc.) and return raw audio bytes — usually
+    MP3, sometimes WAV. The :class:`TTSService` sits above this port and
+    owns caching, hashing, and the ``cache_id`` that the API route hands
+    to the client.
+
+    Failure modes: implementations MUST raise the framework-native
+    exception (``httpx.HTTPError``, ``RuntimeError``) on transport or
+    provider-side errors. ``TTSService`` rewraps these as
+    ``TTSError`` so callers never need to know about the underlying
+    transport.
+    """
+
+    async def synthesize(
+        self,
+        text: str,
+        voice_id: str,
+        model: str,
+        *,
+        speed: float = 1.0,
+    ) -> bytes:
+        """Synthesise ``text`` and return the raw audio bytes.
+
+        ``voice_id`` and ``model`` are opaque to the port — the service
+        passes through whatever the operator configured. ``speed`` is
+        a 0.5..2.0 multiplier that some providers accept; providers
+        that don't support it should ignore it (don't error).
+        """
         ...

@@ -12,7 +12,18 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from api.routes import bots, chat, config, files, knowledge, personas, server_info, setup, threads
+from api.routes import (
+    bots,
+    chat,
+    config,
+    files,
+    knowledge,
+    personas,
+    server_info,
+    setup,
+    threads,
+    tts,
+)
 from app.application.exceptions import (
     ApplicationError,
     ExternalServiceError,
@@ -52,10 +63,7 @@ async def _access_log_dispatch(request: Request, call_next):
     if path == "/api/health" and not os.getenv("LOG_HEALTH"):
         return response
     status_code = response.status_code
-    line = (
-        f"{request.method} {path} -> {status_code} "
-        f"({elapsed_ms:.1f}ms)"
-    )
+    line = f"{request.method} {path} -> {status_code} ({elapsed_ms:.1f}ms)"
     if status_code >= 500:
         logger.error(line)
     elif status_code >= 400:
@@ -152,6 +160,7 @@ def create_app() -> FastAPI:
     app.include_router(config.router, prefix="/api/config", tags=["Config"])
     app.include_router(setup.router, prefix="/api/setup", tags=["Setup"])
     app.include_router(server_info.router, tags=["Server Info"])
+    app.include_router(tts.router, prefix="/api/tts", tags=["TTS"])
 
     @app.get("/api/health")
     async def health():

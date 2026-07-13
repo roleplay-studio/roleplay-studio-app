@@ -258,6 +258,36 @@ class Settings(BaseSettings):
     # produce megabytes per request.
     log_file: str | None = None
 
+    # ── TTS (text-to-speech) ───────────────────────────────────────
+    # Operator-level switch. ``"minimax"`` hits
+    # ``https://api.minimaxi.com/v1/t2a_v2``; ``"mock"`` swaps in an
+    # in-process deterministic synthesizer (no API call, no cost) for
+    # E2E suites and local dev; ``"disabled"`` (default) means the
+    # frontend hides the play button entirely — TTS is opt-in.
+    #
+    # Key/auth: ``tts_api_key`` falls back to ``llm_api_key`` via the
+    # validator below so users who already have a provider key don't
+    # have to duplicate it. Base URL is overridable for proxying /
+    # LM Studio TTS.
+    tts_provider: Literal["disabled", "mock", "minimax"] = "disabled"
+    tts_api_key: SecretStr | None = None
+    tts_base_url: str = "https://api.minimaxi.com/v1"
+    # MiniMax's published voice catalog uses ``<Language>_<Persona>``
+    # strings (e.g. ``Russian_ReliableMan``, ``English_Graceful_Lady``,
+    # ``German_SweetLady``). ``english_female_1`` is NOT a real id —
+    # the default value was set when the integration was written
+    # against an older catalog and silently returns HTTP 502 on first
+    # use. ``Russian_ReliableMan`` is a safe documented default; the
+    # Settings page exposes the full catalog so operators can pick.
+    tts_voice_id: str = "Russian_ReliableMan"
+    tts_model: str = "speech-02-turbo"
+    tts_speed: float = Field(1.0, ge=0.5, le=2.0)
+    # Where synthesised audio is cached on disk. Bare filename resolves
+    # under ``data_dir`` so a relative ``tts_cache`` in .env lands in
+    # ``$ROLEPLAY_DATA_DIR/tts_cache/`` — the same lifecycle as the
+    # Chroma / uploads directories.
+    tts_cache_dir: str = "tts_cache"
+
     # Project version — default_factory reads it at construction
     # time so updating pyproject.toml is reflected without a re-install
     # in dev mode. The AliasChoices makes pydantic-settings pick up
@@ -284,7 +314,7 @@ class Settings(BaseSettings):
         """
         if not isinstance(data, dict):
             return data
-        for k in ("embedding_base_url", "embedding_api_key"):
+        for k in ("embedding_base_url", "embedding_api_key", "tts_api_key"):
             v = data.get(k)
             if isinstance(v, str) and v == "":
                 data[k] = None
@@ -347,6 +377,28 @@ class Settings(BaseSettings):
         if self.llm_api_key is None:
             raise ConfigurationError("LLM_API_KEY environment variable is required")
         return self.llm_api_key.get_secret_value()
+
+    @property
+    def effective_tts_api_key(self) -> SecretStr | None:
+        """TTS key with fallback to ``llm_api_key``.
+
+        Mirrors ``effective_embedding_api_key`` — if the operator
+        hasn't set ``TTS_API_KEY`` explicitly, we re-use the LLM key
+        so users with one MiniMax key don't have to duplicate it.
+        Returns ``None`` when neither is set (caller should bail —
+        don't auto-create).
+        """
+        return self.tts_api_key if self.tts_api_key is not None else self.llm_api_key
+
+    @property
+    def effective_tts_cache_dir(self) -> Path:
+        """Absolute TTS cache directory — bare names resolve under ``data_dir``.
+
+        Separate property (not piggy-backed on ``_resolve``) so the
+        TTS bootstrap code can read it without coupling to other
+        cache dirs (Chroma / uploads).
+        """
+        return self._resolve(self.tts_cache_dir)
 
     @property
     def data_dir(self) -> Path:

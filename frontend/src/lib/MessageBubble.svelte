@@ -6,7 +6,7 @@
   import { formatRelativeTime } from './time';
   import ActionButtons from './ui/ActionButtons.svelte';
   import GameStats from './ui/GameStats.svelte';
-  import { GeneratedAvatar, Tooltip } from './ui/index';
+  import { GeneratedAvatar, Tooltip, TTSButton } from './ui/index';
   import { type MetadataEntry, parseMessageContent } from './utils/parseMetadata';
 
   const {
@@ -19,6 +19,7 @@
     onaction,
     ondelete,
     onedit,
+    onfork,
     onopendebug,
     onregenerate,
     onretry,
@@ -38,6 +39,10 @@
     onaction?: (text: string) => void;
     ondelete?: (msgId: number) => void;
     onedit?: (m: Message) => void;
+    /** Fork the conversation into a new thread from this message.
+     *  When provided, both the action buttons (visible affordance)
+     *  and the right-click context menu show a fork item. */
+    onfork?: (m: Message) => void;
     /** Open the dev-mode LLM debug modal for this assistant message.
      *  Only wired up when the parent has debug info for this id. */
     onopendebug?: () => void;
@@ -186,6 +191,10 @@
       menuPos = null;
       onedit?.(m);
     }}
+    onfork={(m) => {
+      menuPos = null;
+      onfork?.(m);
+    }}
   />
 {/if}
 {#if msg.role === 'assistant'}
@@ -263,6 +272,9 @@
       {#if msg.id !== null}
         <div class="mb-actions">
           {@render versionControls()}
+          {#if msg.content}
+            <TTSButton content={parsed.mainContent} />
+          {/if}
           {#if isLast && msg.role === 'assistant' && onregenerate}
             <Tooltip text={t('message.regenerate', lang)} position="bottom">
               <button
@@ -310,6 +322,34 @@
                     d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"
                   ></path></svg
                 >
+              </button>
+            </Tooltip>
+          {/if}
+          {#if onfork}
+            <Tooltip text={t('message.fork', lang)} position="bottom">
+              <button
+                class="mb-action-btn"
+                onclick={() => onfork?.(msg)}
+                aria-label={t('message.fork', lang)}
+                type="button"
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="6" cy="5" r="2"></circle>
+                  <circle cx="6" cy="19" r="2"></circle>
+                  <circle cx="18" cy="12" r="2"></circle>
+                  <path d="M6 7v10"></path>
+                  <path d="M6 12c0-3.31 2.69-6 6-6h0"></path>
+                </svg>
               </button>
             </Tooltip>
           {/if}
@@ -426,6 +466,34 @@
                     d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"
                   ></path></svg
                 >
+              </button>
+            </Tooltip>
+          {/if}
+          {#if onfork}
+            <Tooltip text={t('message.fork', lang)} position="bottom">
+              <button
+                class="mb-action-btn"
+                onclick={() => onfork?.(msg)}
+                aria-label={t('message.fork', lang)}
+                type="button"
+              >
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  aria-hidden="true"
+                >
+                  <circle cx="6" cy="5" r="2"></circle>
+                  <circle cx="6" cy="19" r="2"></circle>
+                  <circle cx="18" cy="12" r="2"></circle>
+                  <path d="M6 7v10"></path>
+                  <path d="M6 12c0-3.31 2.69-6 6-6h0"></path>
+                </svg>
               </button>
             </Tooltip>
           {/if}

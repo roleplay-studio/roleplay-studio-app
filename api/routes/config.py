@@ -57,6 +57,18 @@ async def get_config():
         "environment": environment,
         "debug_enabled": settings.debug_enabled,
         "debug_env_raw": debug_env,
+        # ── TTS (text-to-speech) ─────────────────────────────────
+        # Surfaced read-only here; the Settings page has a tab that
+        # PUTs these back through ``POST /api/config``. ``api_key``
+        # flag matches the LLM/embedding pattern so the page can
+        # show a "configured" badge without leaking the key.
+        "tts_provider": settings.tts_provider,
+        "tts_api_key_configured": settings.effective_tts_api_key is not None,
+        "tts_base_url": settings.tts_base_url,
+        "tts_voice_id": settings.tts_voice_id,
+        "tts_model": settings.tts_model,
+        "tts_speed": settings.tts_speed,
+        "tts_cache_dir": settings.tts_cache_dir,
     }
 
 
@@ -111,6 +123,18 @@ async def update_config(body: UpdateConfigRequest):
         if body.context_compression_keep_recent is not None
         else None,
         "HISTORY_LIMIT": str(body.history_limit) if body.history_limit is not None else None,
+        # ── TTS (text-to-speech) ─────────────────────────────────
+        # Persisted via the same dotenv set_key + reset_container
+        # dance as the rest of the schema. ``tts_api_key`` writes
+        # an empty string as "" which Settings reads as ``None``
+        # ("use llm_api_key fallback") — see ``Settings.preprocess``.
+        "TTS_PROVIDER": body.tts_provider,
+        "TTS_API_KEY": body.tts_api_key,
+        "TTS_BASE_URL": body.tts_base_url,
+        "TTS_VOICE_ID": body.tts_voice_id,
+        "TTS_MODEL": body.tts_model,
+        "TTS_SPEED": str(body.tts_speed) if body.tts_speed is not None else None,
+        "TTS_CACHE_DIR": body.tts_cache_dir,
     }
 
     for env_key, value in env_updates.items():

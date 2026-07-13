@@ -28,6 +28,18 @@ class UpdateConfigRequest(BaseModel):
     # can omit it from its PATCH (saves don't overwrite fields the
     # user didn't change). ``Field(ge=10)`` mirrors Settings.
     history_limit: int | None = Field(default=None, ge=10)
+    # ── TTS (text-to-speech) ────────────────────────────────────────
+    # Same ``None``-leaves-existing-value semantics as the rest of
+    # this schema — the Settings page sends only fields the user
+    # actually changed. ``tts_api_key`` accepts ``""`` to mean
+    # "clear the explicit TTS key, fall back to llm_api_key".
+    tts_provider: str | None = Field(default=None, pattern=r"^(disabled|mock|minimax)$")
+    tts_api_key: str | None = None
+    tts_base_url: str | None = None
+    tts_voice_id: str | None = None
+    tts_model: str | None = None
+    tts_speed: float | None = Field(default=None, ge=0.5, le=2.0)
+    tts_cache_dir: str | None = None
 
 
 class UpdateBotRequest(BaseModel):

@@ -10,6 +10,7 @@ from app.application.services.persona import PersonaService
 from app.application.services.settings import SettingsService
 from app.application.services.summary import SummaryService
 from app.application.services.thread import ThreadService
+from app.application.services.tts import TTSService
 from app.application.services.upload import UploadService
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     "PersonaService",
     "SettingsService",
     "SummaryService",
+    "TTSService",
     "ThreadService",
     "UploadService",
 ]

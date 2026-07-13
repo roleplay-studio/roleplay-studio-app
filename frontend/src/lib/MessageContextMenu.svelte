@@ -12,11 +12,17 @@
     msg,
     onclose,
     onedit,
+    onfork,
     position,
   }: {
     msg: Message;
     onclose: () => void;
     onedit?: (m: Message) => void;
+    /** Fork the conversation into a new thread from this message.
+     *  Wired up by the chat page; the menu renders the item only
+     *  when the callback is provided so non-chat surfaces
+     *  (e.g. catalog demos) don't show a dead control. */
+    onfork?: (m: Message) => void;
     position: null | { x: number; y: number };
   } = $props();
 
@@ -113,6 +119,11 @@
     onedit?.(msg);
     onclose();
   }
+
+  function handleFork() {
+    onfork?.(msg);
+    onclose();
+  }
 </script>
 
 {#if position && adjustedPos}
@@ -154,6 +165,29 @@
       </svg>
       <span>{t('message.menu.edit', lang)}</span>
     </button>
+    {#if onfork}
+      <button class="ctx-item" type="button" role="menuitem" onclick={handleFork}>
+        <svg
+          class="ico"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <!-- Branch / fork icon — same family as the GitHub fork
+               symbol, 2px stroke for visual parity with the edit pencil. -->
+          <circle cx="6" cy="5" r="2"></circle>
+          <circle cx="6" cy="19" r="2"></circle>
+          <circle cx="18" cy="12" r="2"></circle>
+          <path d="M6 7v10"></path>
+          <path d="M6 12c0-3.31 2.69-6 6-6h0"></path>
+        </svg>
+        <span>{t('message.menu.fork', lang)}</span>
+      </button>
+    {/if}
   </div>
 {/if}
 

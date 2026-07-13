@@ -58,9 +58,9 @@ class _FakeBots:
 class _FakeKnowledge:
     async def search(self, bot_id, query, top_k):
         return []
+
     async def has_documents(self, bot_id):
         return False
-
 
 
 class _FakeOrchestrator:
@@ -169,6 +169,9 @@ class _FakeMessages:
         timestamp=None,
         generation_status="complete",
         reasoning: str | None = None,
+        # 0.0.6 — float prompt snapshot, signature aligned with
+        # the real ``MessageRepository.save_branch``.
+        dynamic_system_prompt: str | None = None,
     ):
         return await self.save(
             thread_id,

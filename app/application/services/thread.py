@@ -73,9 +73,18 @@ class ThreadService:
         await self._messages.update_content(first_asst.id, chosen)
 
     async def create_thread(
-        self, bot_id: int, name: str = "new chat", persona_id: int | None = None
+        self,
+        bot_id: int,
+        name: str = "new chat",
+        persona_id: int | None = None,
+        parent_thread_id: int | None = None,
     ) -> int:
-        thread_id = await self._threads.create(bot_id, name.strip() or "new chat")
+        thread_id = await self._threads.create(
+            bot_id,
+            name.strip() or "new chat",
+            persona_id=persona_id,
+            parent_thread_id=parent_thread_id,
+        )
         if persona_id is not None:
             await self._threads.set_persona(thread_id, persona_id)
         return thread_id
@@ -258,6 +267,143 @@ class ThreadService:
         if not versions or versions[0].branch_group is None:
             raise NotFoundError(f"Message {message_id} has no branch versions")
         await self._messages.switch_version(versions[0].branch_group, target_version_id)
+
+    async def fork_at_message(self, thread_id: int, message_id: int) -> int:
+        """Create a new chat thread that snapshots the conversation up to
+        ``message_id`` (inclusive), then return the new thread id.
+
+        The user-facing flow: the user clicks a fork icon on a message
+        in the chat UI, and the backend produces an independent
+        ``ChatThread`` containing a copy of every active message from
+        the source thread whose id is <= ``message_id``. The frontend
+        redirects them to the new thread so they can continue chatting
+        without affecting the original. The source thread is
+        read-only — no rows are inserted, updated, or deleted on it.
+
+        Implementation notes (correspond to the touchpoints in the
+        test fixture / route layer):
+
+        * **Active-chain filter** is applied by
+          ``MessageRepository.list_active_until``, which mirrors the
+          SQL filter of ``list_for_thread`` (rows with no
+          ``branch_group`` plus the active row of any branch group).
+          Diverging filters would silently drop messages the chat UI
+          is showing — pitfall 6at.
+        * **Branch groups collapse** to ``None`` on the copied rows
+          because the new thread has no siblings to navigate to.
+          Users who forked at a branched message expect a clean
+          linear chain in the fork, not a stale version-switcher.
+        * **Per-message metadata** (``state``, ``reasoning``,
+          ``dynamic_system_prompt``, ``short_content``,
+          ``generation_status``, original ``timestamp``) is copied
+          verbatim so the fork renders identically to the source up
+          to that point.
+        * **Thread-level metadata** inherited from the source:
+          ``bot_id``, ``persona_id``, ``summary``. The new thread's
+          ``name`` is prefixed with ``"Fork of "`` so the sidebar
+          makes the lineage obvious without forcing the user to
+          rename it.
+        * **Attached files (``ThreadFile``)** are NOT copied —
+          they're bound to the original thread. The fork has its
+          own upload context; carrying files across would create
+          phantom attachments pointing at rows the user never
+          explicitly added to the new thread.
+
+        Raises:
+            NotFoundError: source thread does not exist, or
+                ``message_id`` doesn't belong to it. Both surface as
+                404 at the route layer so the frontend can show a
+                sensible error instead of creating an empty thread.
+        """
+        # 1. Pull the source thread so we can inherit bot_id /
+        # persona_id / summary. Done BEFORE listing messages so the
+        # "thread not found" error wins over "no messages" — that
+        # ordering matters for the test suite's contract.
+        source = await self._threads.get(thread_id)
+        if source is None:
+            raise NotFoundError(f"Thread {thread_id} was not found")
+
+        # 2. Snapshot the active conversation up to and including
+        # ``message_id``. Returns oldest-first, ready to persist.
+        snapshot = await self._messages.list_active_until(
+            thread_id=thread_id, until_message_id=message_id
+        )
+        if not snapshot:
+            raise NotFoundError(
+                f"Thread {thread_id} has no messages up to id {message_id}"
+            )
+        # 2a. Strict id-existence check — the ``list_active_until`` filter
+        # is ``id <= until_message_id AND active-chain``, which is
+        # silent-tolerant of a stale id (e.g. ``999999`` returns the
+        # whole chain because every row passes the ``id <= 999999``
+        # test). Without this guard the user would silently get a
+        # "fork the entire thread" when they asked for a specific
+        # message that doesn't exist — confusing UX and a data-
+        # integrity footgun. The frontend always supplies the
+        # message's own id, so a 404 here means the row was deleted
+        # between list and fork (race) or the id was hand-crafted
+        # (a test or a malicious client).
+        if not any(m.id == message_id for m in snapshot):
+            raise NotFoundError(
+                f"Message {message_id} was not found in thread {thread_id}"
+            )
+        # 3. Create the new thread inheriting bot_id + persona_id.
+        # The name carries the lineage marker; trimming the source
+        # name keeps the sidebar readable when the source has a long
+        # name like "Evening chat — Princess Lyra — Chapter 4".
+        new_name = f"Fork of {source.name}".strip()
+        new_thread_id = await self._threads.create(
+            bot_id=source.bot_id,
+            name=new_name,
+            persona_id=source.persona_id,
+            parent_thread_id=source.id,
+        )
+
+        # 4. Carry the source's persisted summary across. The
+        # summary is bot-authored prose describing the plot so far —
+        # forking from mid-conversation means the new thread starts
+        # with the same narrative context.
+        if source.summary:
+            await self._threads.update_summary(new_thread_id, source.summary)
+
+        # 5. Copy every message in the snapshot. ``save`` is the
+        # linear insert path (no branch_group, is_active=True) — the
+        # right semantics for a fresh thread that has no branch
+        # history to navigate to.
+        for msg in snapshot:
+            if msg.id is None:
+                # Defensive: the SQL repo always assigns ids; this
+                # guards against future refactors where a synthetic
+                # MessageDTO sneaks into the snapshot.
+                continue
+            await self._messages.save(
+                thread_id=new_thread_id,
+                role=msg.role,
+                content=msg.content,
+                # Branch groups collapse: the fork has no siblings
+                # to navigate to, so we don't keep the link.
+                branch_group=None,
+                branch_index=0,
+                is_active=True,
+                short_content=msg.short_content,
+                # Preserve the original timestamp so chronological
+                # ordering matches what the user was looking at.
+                timestamp=msg.created_at,
+                generation_status=msg.generation_status,
+                reasoning=msg.reasoning,
+                # None on the source becomes None on the copy.
+                # ``dynamic_system_prompt`` is the snapshot the LLM
+                # saw; the user opens the fork expecting the same
+                # floating-prompt panel.
+                dynamic_system_prompt=msg.dynamic_system_prompt,
+                # Same for world-state — copy verbatim so the
+                # state-update task in the new thread starts from
+                # the same world as the user saw when they hit
+                # fork.
+                state=msg.state,
+            )
+
+        return new_thread_id
 
     async def export_messages(self, thread_id: int) -> list[ExportMessageDTO]:
         """Export all messages for a thread (excludes system)."""

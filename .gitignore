@@ -8,6 +8,7 @@ __pycache__/
 .DS_Store
 uploads/
 chroma_db/
+tts_cache/
 node_modules/
 dist/
 *.egg-info/

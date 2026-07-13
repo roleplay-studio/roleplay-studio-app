@@ -1,7 +1,7 @@
 """Thread CRUD routes."""
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from api.deps import ContainerDep
 from api.schemas import EditMessageRequest
@@ -16,6 +16,18 @@ router = APIRouter()
 
 class SetFirstMessageRequest(BaseModel):
     greeting_index: int
+
+
+class ForkThreadRequest(BaseModel):
+    """Body of ``POST /api/threads/{thread_id}/fork``.
+
+    ``message_id`` is the id of the message the user clicked the fork
+    icon on. The backend snapshots the active conversation up to and
+    including this message into a new thread and returns the new
+    thread id so the frontend can redirect.
+    """
+
+    message_id: int = Field(gt=0)
 
 
 @router.put("/{thread_id}/first-message")
@@ -177,6 +189,43 @@ async def cascade_delete_messages(thread_id: int, message_id: int, container: Co
         return {"ok": True}
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+
+
+@router.post("/{thread_id}/fork", response_model=ThreadDTO)
+async def fork_thread(
+    thread_id: int,
+    body: ForkThreadRequest,
+    container: ContainerDep,
+):
+    """Snapshot the conversation up to ``message_id`` into a new thread.
+
+    The user-facing contract: the user clicks a fork icon on a
+    message in the chat UI, this endpoint produces an independent
+    thread containing a copy of every active message up to and
+    including that message, and the frontend redirects them to the
+    new thread.
+
+    Returns the new thread's ``ThreadDTO`` so the client can wire it
+    straight into the chat header without a follow-up GET.
+
+    Errors:
+
+    * ``404 NotFoundError`` — source thread doesn't exist, or the
+      supplied ``message_id`` doesn't belong to the source thread
+      (idempotent on the not-found contract so the frontend can
+      fall back to a friendly error toast).
+    """
+    try:
+        new_thread_id = await container.threads.fork_at_message(
+            thread_id=thread_id, message_id=body.message_id
+        )
+    except NotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    # ``fork_at_message`` returns the new id, but we always re-fetch
+    # the DTO so the response shape (with name, summary, persona_id
+    # populated by the repo) matches every other endpoint that
+    # returns ``ThreadDTO``.
+    return await container.threads.get_thread(new_thread_id)
 
 
 # ── Context Compression ──────────────────────────────────────────────
