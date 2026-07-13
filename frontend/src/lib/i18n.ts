@@ -3979,9 +3979,8 @@ function parsePluralBranches(body: string): Record<string, string> {
   const out: Record<string, string> = {};
   // Match each ``<category> {<text>}`` — text may contain braces so
   // we only match the outermost braces by scanning brace depth.
-  const re = /\b(one|other|few|many|two|few|many)\s*\{/g;
-  let m: RegExpExecArray | null;
-  let cursor = 0;
+  const re = /\b(one|other|few|many|two)\s*\{/g;
+  let m: null | RegExpExecArray;
   while ((m = re.exec(body)) !== null) {
     const cat = m[1];
     const start = re.lastIndex; // after the '{'
@@ -3996,7 +3995,6 @@ function parsePluralBranches(body: string): Record<string, string> {
     }
     if (depth === 0) {
       out[cat] = body.slice(start, i - 1);
-      cursor = i;
     } else {
       // Unbalanced — bail.
       break;
