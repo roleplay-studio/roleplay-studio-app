@@ -319,7 +319,7 @@ export interface Thread {
   id: number;
   name: string;
   /** FK to the source thread (forks only). Null for root threads. */
-  parent_thread_id?: number | null;
+  parent_thread_id?: null | number;
   persona_id: null | number;
   persona_name: null | string;
   summary: null | string;

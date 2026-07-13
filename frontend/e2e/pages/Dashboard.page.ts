@@ -6,21 +6,22 @@
  * with the route hash is the only stable signal that we
  * navigated to "/" successfully.
  */
-import type { Page, Locator } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
+
 import { BasePage } from './BasePage';
 
 export class DashboardPage extends BasePage {
-  constructor(page: Page) {
-    super(page);
+  /** Body of the main viewport — what the user actually sees. */
+  get content(): Locator {
+    return this.page.locator('main').first();
   }
 
   get main(): Locator {
     return this.page.locator('main');
   }
 
-  /** Body of the main viewport — what the user actually sees. */
-  get content(): Locator {
-    return this.page.locator('main').first();
+  constructor(page: Page) {
+    super(page);
   }
 
   async waitForDashboard(): Promise<void> {
@@ -29,10 +30,8 @@ export class DashboardPage extends BasePage {
     // (no wizard, no error screen). The URL itself may or may
     // not carry the trailing "#/" depending on whether the user
     // was redirected from "/connect" — so we don't anchor on it.
-    await this.page.waitForFunction(
-      () => !!document.querySelector('aside.sb-root nav'),
-      null,
-      { timeout: 5_000 },
-    );
+    await this.page.waitForFunction(() => !!document.querySelector('aside.sb-root nav'), null, {
+      timeout: 5_000,
+    });
   }
 }

@@ -1275,7 +1275,7 @@
    * and the modal's ``{#if messageState !== null}`` branch is hidden
    * anyway.
    */
-  async function saveEditModal(text: string, newState: string | null) {
+  async function saveEditModal(text: string, newState: null | string) {
     if (selectedThreadId === null || editMessageId === null) return;
     if (!text.trim()) return;
     try {

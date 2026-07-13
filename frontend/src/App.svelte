@@ -175,8 +175,7 @@
     let delay = 1000;
     const maxAttempts = 30;
 
-    const sleep = (ms: number) =>
-      new Promise<void>((resolve) => setTimeout(resolve, ms));
+    const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
     // Combine our own controller signal with a 3s safety timeout.
     // ``AbortSignal.any`` was added in Safari 17.4 (macOS 14.4) and
@@ -193,10 +192,14 @@
       const t = setTimeout(() => timed.abort(), 3000);
       // If our outer controller aborts, cancel the timeout so it
       // doesn't leak.
-      controller.signal.addEventListener('abort', () => {
-        clearTimeout(t);
-        timed.abort();
-      }, { once: true });
+      controller.signal.addEventListener(
+        'abort',
+        () => {
+          clearTimeout(t);
+          timed.abort();
+        },
+        { once: true },
+      );
       return timed.signal;
     };
 

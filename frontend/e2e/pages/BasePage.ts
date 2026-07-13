@@ -9,7 +9,7 @@
  * has had a chance to wire the listener, so a fresh navigation
  * is the right primitive there.
  */
-import type { Page, Locator } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 
 export class BasePage {
   constructor(public readonly page: Page) {}
@@ -30,6 +30,10 @@ export class BasePage {
     await this.page.goto('/');
   }
 
+  locator(selector: string): Locator {
+    return this.page.locator(selector);
+  }
+
   /**
    * Healthcheck — until the splash dissolves into a real page,
    * App.svelte polls /api/health with exponential backoff. We
@@ -40,9 +44,5 @@ export class BasePage {
    */
   async waitForAppReady(): Promise<void> {
     await this.page.waitForSelector('aside.sb-root', { timeout: 30_000 });
-  }
-
-  locator(selector: string): Locator {
-    return this.page.locator(selector);
   }
 }

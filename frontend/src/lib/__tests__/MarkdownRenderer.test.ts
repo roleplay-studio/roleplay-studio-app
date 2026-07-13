@@ -36,9 +36,7 @@ describe('MarkdownRenderer', () => {
     });
     const wrapper = container.querySelector('.code-block-wrapper');
     expect(wrapper?.getAttribute('data-lang')).toBe('plaintext');
-    expect(container.querySelector('.code-lang-label')?.textContent).toBe(
-      'PLAINTEXT',
-    );
+    expect(container.querySelector('.code-lang-label')?.textContent).toBe('PLAINTEXT');
   });
 
   it('renders markdown tables with header + body rows', () => {

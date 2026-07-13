@@ -81,13 +81,7 @@
   // colouring. We escape the source first, then let hljs emit
   // pre-coloured span markup on top. We also surface the
   // detected language as a visible label in the top-left.
-  function codeRenderer({
-    lang,
-    text,
-  }: {
-    lang?: string;
-    text: string;
-  }): string {
+  function codeRenderer({ lang, text }: { lang?: string; text: string }): string {
     const language = lang && hljs.getLanguage(lang) ? lang : 'plaintext';
     let highlighted: string;
     try {

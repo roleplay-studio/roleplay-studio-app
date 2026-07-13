@@ -96,11 +96,7 @@
   }
   function flatten(roots: TreeNode[]): FlatRow[] {
     const out: FlatRow[] = [];
-    const visit = (
-      node: TreeNode,
-      depth: number,
-      parentName: null | string,
-    ): void => {
+    const visit = (node: TreeNode, depth: number, parentName: null | string): void => {
       const thisName = node.thread.name;
       out.push({ depth, node, parentName });
       for (const child of node.children) {
