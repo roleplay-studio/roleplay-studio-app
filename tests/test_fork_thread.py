@@ -646,16 +646,17 @@ async def test_fork_nonexistent_message_id_in_real_thread_raises_not_found(
     returned 200 and a full-thread copy. The strict id-existence
     check in ``fork_at_message`` is the fix; this test pins it.
     """
-    from sqlmodel import select
     from typing import cast
 
+    from sqlmodel import select
+
+    from app.application.exceptions import NotFoundError
+    from app.application.services.thread import ThreadService
     from app.infrastructure.db.models import Bot, ChatThread, Conversation
     from app.infrastructure.repositories.sqlalchemy import (
         SqlAlchemyMessageRepository,
         SqlAlchemyThreadRepository,
     )
-    from app.application.services.thread import ThreadService
-    from app.application.exceptions import NotFoundError
 
     async with fork_store._async_session_factory() as session:
         bot = Bot(
@@ -764,12 +765,12 @@ async def test_fork_round_trip_persists_parent_thread_id_in_list_for_bot(
     """
     from typing import cast
 
+    from app.application.services.thread import ThreadService
     from app.infrastructure.db.models import Bot, ChatThread, Conversation
     from app.infrastructure.repositories.sqlalchemy import (
         SqlAlchemyMessageRepository,
         SqlAlchemyThreadRepository,
     )
-    from app.application.services.thread import ThreadService
 
     async with fork_store._async_session_factory() as session:
         bot = Bot(
