@@ -360,6 +360,7 @@ class SqlAlchemyThreadRepository:
                 summary=thread.summary,
                 persona_id=thread.persona_id,
                 created_at=thread.created_at,
+                parent_thread_id=thread.parent_thread_id,
             )
 
     async def list_for_bot(self, bot_id: int) -> list[ThreadDTO]:
@@ -373,11 +374,12 @@ class SqlAlchemyThreadRepository:
                         t.summary,
                         t.persona_id,
                         p.name AS persona_name,
-                        t.created_at
+                        t.created_at,
+                        t.parent_thread_id
                     FROM chat_threads t
                     LEFT JOIN user_personas p ON t.persona_id = p.id
                     WHERE t.bot_id = :bot_id
-                    ORDER BY t.created_at DESC, t.id DESC
+                    ORDER BY t.created_at ASC, t.id ASC
                 """),
                 {"bot_id": bot_id},
             )
@@ -391,6 +393,7 @@ class SqlAlchemyThreadRepository:
                     persona_id=row.persona_id,
                     persona_name=row.persona_name,
                     created_at=row.created_at,
+                    parent_thread_id=row.parent_thread_id,
                 )
                 for row in rows
             ]
@@ -453,6 +456,7 @@ class SqlAlchemyThreadRepository:
                 summary=thread.summary,
                 persona_id=thread.persona_id,
                 created_at=thread.created_at,
+                parent_thread_id=thread.parent_thread_id,
             )
 
     async def set_pending_greeting(self, thread_id: int, content: str) -> None:

@@ -202,6 +202,8 @@ class ThreadDTO(BaseModel):
     persona_id: int | None = None
     persona_name: str | None = None
     created_at: datetime | None = None
+    # FK to the thread this one was forked from. None for root threads.
+    parent_thread_id: int | None = None
 
 
 class ThreadStatsDTO(BaseModel):
