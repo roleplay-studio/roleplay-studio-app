@@ -963,6 +963,45 @@
     }
   }
 
+  /** Fork the conversation up to ``messageId`` into a new thread.
+   *
+   * User-facing contract: the user clicks the fork icon on a message
+   * bubble (or the right-click → "Fork from here" item). The backend
+   * returns the new thread's DTO; we splice it into the local
+   * ``threads`` array so the sidebar reflects it, then redirect the
+   * chat view to the new id via the existing ``selectThread`` path
+   * (so all the usual post-thread-switch bookkeeping — pagination
+   * reset, scroll-to-bottom, stats refresh, version cache — runs).
+   *
+   * Failure modes:
+   *   * Network / 5xx → catch block surfaces a translated error toast.
+   *   * 404 → the source thread or ``messageId`` is gone (e.g. another
+   *     tab deleted it). We show a friendlier "no longer in the
+   *     active chain" message because the bare ``detail`` ("Thread
+   *     7 was not found") is too generic to act on.
+   */
+  async function handleFork(messageId: number) {
+    if (!selectedThreadId || streaming) return;
+    try {
+      notificationMessage = t('message.fork_started', lang);
+      const newThread = await api.forkThread(selectedThreadId, messageId);
+      // Insert at the top so the user sees it immediately in the
+      // sidebar list. ``threads`` is sorted oldest-last by
+      // ``listBotThreads``; we mirror that by prepending.
+      threads = [newThread, ...threads];
+      await selectThread(newThread.id);
+    } catch (e) {
+      console.error('Fork failed:', e);
+      const detail = e instanceof Error ? e.message : String(e);
+      // The backend's ``detail`` for 404 is "Message X was not found
+      // in thread Y" — replace it with a UX-shaped message instead.
+      const isNotFound = /404|Not\s*Found|was not found/i.test(detail);
+      notificationMessage = isNotFound
+        ? t('message.fork_not_found', lang)
+        : t('message.fork_failed', lang, { detail });
+    }
+  }
+
   function handleAction(text: string) {
     if (!streaming) {
       sendMessage(text);
@@ -1407,6 +1446,7 @@
               {lang}
               onedit={openEditModal}
               ondelete={confirmDelete}
+              onfork={(m) => handleFork(m.id!)}
               onregenerate={() => handleRegenerate(msg.id!)}
               onretry={handleRetry}
               onaction={handleAction}

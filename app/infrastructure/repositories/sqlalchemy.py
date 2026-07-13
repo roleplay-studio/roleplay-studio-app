@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
+from typing import Literal, cast
 
 from sqlalchemy import (
     delete as sa_delete,
@@ -770,11 +771,77 @@ class SqlAlchemyMessageRepository:
             )
             await session.commit()
 
+    async def list_active_until(
+        self,
+        thread_id: int,
+        until_message_id: int,
+    ) -> list[MessageDTO]:
+        """Return active messages whose id <= ``until_message_id``, oldest first.
+
+        Implements the contract documented on
+        ``MessageRepository.list_active_until`` — same active-chain
+        filter as ``list_for_thread`` (rows with no ``branch_group``
+        plus the active row of any branch group). Used by
+        ``ThreadService.fork_at_message`` so the SQL filter is
+        byte-identical to the one the chat UI sees (pitfall 6at):
+        diverging filters here would silently drop messages the user
+        is currently looking at.
+
+        We deliberately do NOT call ``list_for_thread`` and trim in
+        Python — that path uses ``LIMIT`` and would miss older rows
+        once the chain grows past the page size. A targeted SELECT with
+        ``id <= until_message_id`` is both cheaper and correctness-
+        critical.
+
+        Returns an empty list for an unknown thread / an id that
+        doesn't belong to the thread; the service layer decides
+        whether that's an error.
+        """
+        async with self._store._async_session_factory() as session:
+            rows_result = await session.execute(
+                select(Conversation)
+                .where(
+                    Conversation.thread_id == thread_id,
+                    Conversation.id <= until_message_id,
+                    # Same filter as ``list_for_thread`` — keep these
+                    # two clauses in lockstep when the schema evolves.
+                    (Conversation.branch_group.is_(None)) | (Conversation.is_active.is_(True)),
+                )
+                .order_by(Conversation.id.asc())
+            )
+            rows = list(rows_result.scalars().all())
+            return [
+                MessageDTO(
+                    id=row.id,
+                    role=cast("Literal['system', 'user', 'assistant']", row.role),
+                    content=row.content,
+                    short_content=row.short_content,
+                    reasoning=row.reasoning,
+                    state=row.state,
+                    # ``dynamic_system_prompt`` is NOT NULL with
+                    # server_default='' — coerce the empty-string
+                    # default to ``None`` so the DTO matches what
+                    # ``list_for_thread`` emits (panel renders only
+                    # when a real value is present).
+                    dynamic_system_prompt=row.dynamic_system_prompt or None,
+                    created_at=_ensure_tz(row.timestamp),
+                    branch_group=None,
+                    branch_index=0,
+                    is_active=True,
+                    # Generation status is preserved per-row because
+                    # the fork snapshots the conversation as-is,
+                    # including any partial / streaming artefacts.
+                    generation_status=row.generation_status,
+                )
+                for row in rows
+                if row.content
+            ]
+
     async def count_active(self, thread_id: int) -> int:
         """Count the active chain of messages in ``thread_id``.
 
         Mirrors ``list_for_thread``'s branch-group filter: rows with
-        no branch_group plus the active row of any branch group.
+        no ``branch_group`` plus the active row of any branch group.
         Used by ``ThreadService.get_stats`` so the chat header reports
         total messages rather than the latest paginated window.
 

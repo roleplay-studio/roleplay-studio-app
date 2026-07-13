@@ -154,6 +154,48 @@ class MockThreadService:
         if greeting_index > 0:
             raise ValueError("greeting_index out of range")
 
+    async def fork_at_message(self, thread_id, message_id):
+        """Mock implementation of ``ThreadService.fork_at_message``.
+
+        Mirrors the service contract: source must exist, ``message_id``
+        must belong to the source's active chain, otherwise
+        ``NotFoundError``. On success: creates a new thread,
+        snapshots the active chain up to ``message_id`` (inclusive),
+        returns the new id.
+        """
+        from app.application.dto import ThreadDTO
+        from app.application.exceptions import NotFoundError
+
+        source = self.threads.get(thread_id)
+        if source is None:
+            raise NotFoundError(f"Thread {thread_id} was not found")
+
+        chain = self.messages.get(thread_id) or []
+        snapshot = [m for m in chain if (m.id or 0) <= message_id]
+        if not snapshot:
+            raise NotFoundError(f"Message {message_id} was not found in thread {thread_id}")
+
+        # Allocate the new thread id and DTO. Copying ``source``
+        # preserves bot_id / persona_id / summary so the test can
+        # assert on inheritance without poking the mock's internals.
+        # ``next_id`` starts at 1 for a fresh mock and the first
+        # ``create_thread`` call returns 1 — so we increment first
+        # to avoid colliding with whatever the seed id is.
+        self.next_id += 1
+        new_tid = self.next_id
+        new_thread = ThreadDTO(
+            id=new_tid,
+            bot_id=source.bot_id,
+            name=f"Fork of {source.name}".strip(),
+            summary=source.summary,
+            persona_id=source.persona_id,
+        )
+        self.threads[new_tid] = new_thread
+        # Carry the snapshot across so list_messages on the new
+        # thread returns what the user expects after the redirect.
+        self.messages[new_tid] = [m.model_copy() for m in snapshot]
+        return new_tid
+
     async def list_messages(self, thread_id, limit=20, before_id=None):
         all_msgs = self.messages.get(thread_id) or []
         if before_id is not None:
@@ -352,16 +394,12 @@ def make_mock_container():
             try:
                 idx = _state["categories"].index(old_name)
             except ValueError as exc:
-                raise ValidationError(
-                    f"Category {old_name!r} not found"
-                ) from exc
+                raise ValidationError(f"Category {old_name!r} not found") from exc
             for i, n in enumerate(_state["categories"]):
                 if i == idx:
                     continue
                 if n.lower() == new_clean.lower():
-                    raise ValidationError(
-                        f"Category {new_clean!r} already exists"
-                    )
+                    raise ValidationError(f"Category {new_clean!r} already exists")
             _state["categories"][idx] = new_clean
             return list(_state["categories"])
 
@@ -371,9 +409,7 @@ def make_mock_container():
             try:
                 _state["categories"].remove(name)
             except ValueError as exc:
-                raise ValidationError(
-                    f"Category {name!r} not found"
-                ) from exc
+                raise ValidationError(f"Category {name!r} not found") from exc
             return list(_state["categories"])
 
         async def replace_all(self, categories):
@@ -516,9 +552,7 @@ class TestCategories:
         # Start from a known state.
         client.put("/api/bots/categories", json={"categories": ["Anime"]})
         # Append.
-        resp = client.post(
-            "/api/bots/categories", json={"name": "NewCat"}
-        )
+        resp = client.post("/api/bots/categories", json={"name": "NewCat"})
         assert resp.status_code == 201
         data = resp.json()
         assert "NewCat" in data
@@ -593,7 +627,6 @@ class TestCategories:
         body = resp.json()
         assert "Survivor" in body["categories"]
         assert body["categories_invalid"] == ["SoonRemoved"]
-
 
 
 # ── Bots ────────────────────────────────────────────────────────────
@@ -1306,3 +1339,116 @@ class TestManualSummarize:
         # And the summary must land on the underlying mock so the
         # recent-chats preview can see it.
         assert mock_container.threads.threads[thread_id].summary == "A generated summary."
+
+
+# ── Thread fork (POST /api/threads/{id}/fork) ───────────────────────
+
+
+class TestForkThread:
+    """Regression coverage for the thread-fork feature.
+
+    The user-facing contract: clicking the fork icon on a message in
+    the chat UI POSTs ``{message_id}`` to ``/api/threads/{id}/fork``;
+    the backend returns the new thread's ``ThreadDTO`` so the
+    frontend can redirect. Errors surface as 404 with a human-
+    readable detail.
+    """
+
+    def test_fork_returns_new_thread_dto(self, client, seeded_bot):
+        """Happy path: a valid fork returns the new thread's DTO.
+
+        Builds a fresh mock container (same shape as the autouse
+        one) so we can seed the source thread with a non-empty
+        active message chain before invoking the fork endpoint.
+        Without the seed the snapshot is empty and the endpoint
+        returns 404 (covered by ``test_fork_unknown_thread_returns_404``).
+
+        ``_get_container()`` is the production singleton and is
+        *not* subject to ``app.dependency_overrides`` — only
+        ``_get_container`` from ``api.deps`` is (see pitfall 6ax).
+        So we push our mock onto the FastAPI dependency override
+        directly and restore the autouse mock after the call.
+        """
+        from typing import cast
+
+        from api.deps import _get_container
+        from api.main import app
+        from app.application.dto import MessageDTO, ThreadDTO
+        from tests.test_api import MockThreadService
+
+        # Capture whatever override is currently installed (the
+        # autouse fixture sets one) so we can restore it after.
+        previous_override = app.dependency_overrides.get(_get_container, lambda: _get_container())
+
+        mock_container = make_mock_container()
+        mock_threads = cast(MockThreadService, mock_container.threads)
+
+        # Seed a thread (id=1) with two active messages so the
+        # fork snapshot has rows to copy.
+        thread_id = 1
+        mock_threads.threads[thread_id] = ThreadDTO(
+            id=thread_id,
+            bot_id=seeded_bot,
+            name="Original chat",
+            summary="plot so far",
+            persona_id=None,
+        )
+        mock_threads.messages[thread_id] = [
+            MessageDTO(id=1, role="assistant", content="hi"),
+            MessageDTO(id=2, role="user", content="fork from here"),
+        ]
+
+        app.dependency_overrides[_get_container] = lambda: mock_container
+        try:
+            resp = client.post(
+                f"/api/threads/{thread_id}/fork",
+                json={"message_id": 2},
+            )
+        finally:
+            app.dependency_overrides[_get_container] = previous_override
+
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        # New thread id is distinct from the source.
+        assert body["id"] != thread_id
+        # Bot id is inherited — chat context (persona, scenario,
+        # knowledge) is bot-derived, not thread-derived.
+        assert body["bot_id"] == seeded_bot
+        # Lineage marker on the name.
+        assert body["name"].startswith("Fork of ")
+        # And the summary travels too — the user expects narrative
+        # continuity after the redirect.
+        assert body["summary"] == "plot so far"
+
+    def test_fork_unknown_thread_returns_404(self, client):
+        resp = client.post(
+            "/api/threads/9999/fork",
+            json={"message_id": 1},
+        )
+        assert resp.status_code == 404
+        # Detail carries a human-readable hint so the frontend can
+        # surface it in an error toast without re-mapping.
+        assert "9999" in resp.json()["detail"]
+
+    def test_fork_invalid_message_id_returns_422(self, client, seeded_bot):
+        """``message_id <= 0`` fails Pydantic validation before the
+        service is touched — the schema's ``Field(gt=0)`` is the
+        gate. 422 is FastAPI's standard for body-validation errors.
+        """
+        thread_id = client.post(f"/api/bots/{seeded_bot}/threads").json()["id"]
+        resp = client.post(
+            f"/api/threads/{thread_id}/fork",
+            json={"message_id": 0},
+        )
+        assert resp.status_code == 422
+
+    def test_fork_missing_message_id_returns_422(self, client, seeded_bot):
+        """Body without ``message_id`` also fails validation — the
+        frontend must send the target message id explicitly so a
+        mis-wired click doesn't fork the wrong point."""
+        thread_id = client.post(f"/api/bots/{seeded_bot}/threads").json()["id"]
+        resp = client.post(
+            f"/api/threads/{thread_id}/fork",
+            json={},
+        )
+        assert resp.status_code == 422

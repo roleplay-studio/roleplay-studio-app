@@ -450,6 +450,7 @@ export const api = {
       body: JSON.stringify({ persona_id: personaId ?? null }),
       method: 'POST',
     }),
+
   deleteBot: (id: number) => request<{ ok: boolean }>(`/api/bots/${id}`, { method: 'DELETE' }),
   deleteBotVersion: (botId: number, versionId: number) =>
     request<{ ok: boolean }>(`/api/bots/${botId}/versions/${versionId}`, {
@@ -533,6 +534,24 @@ export const api = {
   },
   findThreadByBotAndPersona: (botId: number, personaId: number) =>
     request<{ thread: null | Thread }>(`/api/bots/${botId}/threads/find?persona_id=${personaId}`),
+
+  /** Snapshot the conversation up to ``messageId`` into a new thread.
+   *
+   * User-facing flow: the user clicks the fork icon on a message in
+   * the chat UI; the backend returns the new thread's ``ThreadDTO``
+   * so the frontend can redirect. ``messageId`` MUST belong to the
+   * source thread's active chain — otherwise the backend returns
+   * 404, which the route layer surfaces verbatim so the caller can
+   * decide whether to show an error toast.
+   *
+   * Returns the full ``Thread`` so the caller can wire the new id
+   * into the chat header without a follow-up GET.
+   */
+  forkThread: (threadId: number, messageId: number): Promise<Thread> =>
+    request<Thread>(`/api/threads/${threadId}/fork`, {
+      body: JSON.stringify({ message_id: messageId }),
+      method: 'POST',
+    }),
   getBot: (id: number) => request<Bot>(`/api/bots/${id}`),
 
   getBotVersion: (botId: number, versionId: number) =>

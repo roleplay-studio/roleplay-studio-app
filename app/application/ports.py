@@ -189,6 +189,33 @@ class MessageRepository(Protocol):
         before_id: int | None = None,
     ) -> list[MessageDTO]: ...
 
+    async def list_active_until(
+        self,
+        thread_id: int,
+        until_message_id: int,
+    ) -> list[MessageDTO]:
+        """Return the active chain of messages in ``thread_id`` whose id is
+        less than or equal to ``until_message_id``, ordered oldest-first.
+
+        Mirrors the active-chain filter used by ``list_for_thread``
+        (rows with no ``branch_group`` plus the active row of any branch
+        group). Used by ``ThreadService.fork_at_message`` to assemble a
+        snapshot of the conversation up to the message the user forked
+        from — both endpoints MUST agree on the same filter, or the
+        fork would silently drop messages the chat UI is showing.
+
+        Implementations must:
+
+        * Filter ``thread_id == tid AND id <= until_message_id AND
+          (branch_group IS NULL OR is_active)``.
+        * Order ``id ASC`` so the caller can persist messages in
+          chronological order into the new thread without re-sorting.
+        * Return an empty list (not raise) when the thread has no
+          qualifying rows or the ``until_message_id`` doesn't belong to
+          the thread — the caller decides whether that's an error.
+        """
+        ...
+
     async def count_active(self, thread_id: int) -> int:
         """Count the active chain of messages in ``thread_id``.
 
