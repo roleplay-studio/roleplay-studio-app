@@ -9,7 +9,6 @@
     type LLMUsage,
     type Message,
     type Persona,
-    type RecentThread,
     type Thread,
     type ThreadFileDTO,
     type ThreadStats,
@@ -22,8 +21,8 @@
   import LLMDebugModal from '../LLMDebugModal.svelte';
   import MessageBubble from '../MessageBubble.svelte';
   import PersonaSelectModal from '../PersonaSelectModal.svelte';
-  import RecentChats from '../RecentChats.svelte';
   import ThreadDrawer from '../ThreadDrawer.svelte';
+  import ThreadTree from '../ThreadTree.svelte';
   import Loading from '../ui/Loading.svelte';
   import NotificationModal from '../ui/NotificationModal.svelte';
   import { displayedMessages, isGreetingLocked } from '../utils/chat-greetings';
@@ -132,9 +131,9 @@
   // Thread drawer
   let showThreadDrawer = $state(false);
 
-  // Recent chats
+  // Thread tree (roots + indented forks for the current bot)
   let lang = $state('en');
-  let recentThreads: RecentThread[] = $state([]);
+  let recentThreads: Thread[] = $state([]);
   let unsubLang: (() => void) | undefined;
 
   // Persona select modal for new thread
@@ -225,11 +224,8 @@
     if (selectedBotId) {
       await loadBot(selectedBotId);
     } else {
-      try {
-        recentThreads = await api.listRecentThreads();
-      } catch (e) {
-        console.error('Failed to load recent threads:', e);
-      }
+      // No bot selected — clear the thread tree until one is picked.
+      recentThreads = [];
       loading = false;
     }
     initialLoad = false;
@@ -258,14 +254,8 @@
       messages = [];
       selectedThreadId = null;
       threadStats = null;
-      loading = true;
-      api
-        .listRecentThreads()
-        .then((t) => {
-          recentThreads = t;
-          loading = false;
-        })
-        .catch(() => (loading = false));
+      recentThreads = [];
+      loading = false;
     }
   });
 
@@ -307,7 +297,14 @@
   async function loadBot(id: number) {
     try {
       bot = await api.getBot(id);
-      threads = await api.listBotThreads(id);
+      // Fetch the thread list once — it powers BOTH the active-thread
+      // state (used by MessageBubble) and the sidebar tree (Task 12).
+      // They live in two separate $state slots; the sidebar tree
+      // refreshes independently when the user forks a thread via
+      // handleFork (refetch-on-event).
+      const allThreads = await api.listBotThreads(id);
+      threads = allThreads;
+      recentThreads = allThreads;
       // If threadId specified, select it; otherwise auto-select first
       const targetThread = threadIdParam
         ? threads.find((t) => t.id === parseInt(threadIdParam))
@@ -985,9 +982,17 @@
     try {
       notificationMessage = t('message.fork_started', lang);
       const newThread = await api.forkThread(selectedThreadId, messageId);
-      // Insert at the top so the user sees it immediately in the
-      // sidebar list. ``threads`` is sorted oldest-last by
-      // ``listBotThreads``; we mirror that by prepending.
+      // Refetch the thread tree so the new fork appears in the sidebar
+      // immediately with its parent_thread_id link intact. We can't
+      // just prepend newThread to recentThreads — the tree relies on
+      // the server's parent_thread_id assignment, which the response
+      // carries but which we'd have to merge into the existing array.
+      // Refetch is simpler and the endpoint is cheap (one SELECT).
+      if (selectedBotId) {
+        recentThreads = await api.listBotThreads(selectedBotId);
+      }
+      // ``threads`` (active-thread state) gets the new entry inline so
+      // selectThread(newThread.id) finds it in the list.
       threads = [newThread, ...threads];
       await selectThread(newThread.id);
     } catch (e) {
@@ -1339,19 +1344,15 @@
   {:else if !bot}
     <div class="chat-recent-view">
       <div class="chat-recent-header">
-        <h2 class="chat-recent-title">{t('chat.recent.title', lang)}</h2>
-        <p class="chat-recent-subtitle">{t('chat.recent.subtitle', lang)}</p>
+        <h2 class="chat-recent-title">{t('chat.tree.title', lang)}</h2>
       </div>
       <div class="chat-recent-list">
-        <RecentChats
+        <ThreadTree
           threads={recentThreads}
-          {loading}
+          botId={selectedBotId ?? 0}
           onselectThread={(botId, threadId) =>
             (window.location.hash = `/chat?bot=${botId}&thread=${threadId}`)}
-          ondeleteThread={async (threadId) => {
-            await api.deleteThread(threadId);
-            recentThreads = recentThreads.filter((t) => t.thread_id !== threadId);
-          }}
+          {lang}
         />
       </div>
     </div>
