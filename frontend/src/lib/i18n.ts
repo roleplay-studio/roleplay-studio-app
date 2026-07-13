@@ -3936,5 +3936,86 @@ export function t(key: string, lang: string, vars?: Record<string, number | stri
   const value = raw === undefined && lang !== 'en' ? dict.en[key] : raw;
   if (value === undefined) return key;
   if (!vars) return value;
-  return value.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? `{${k}}`));
+  return interpolateIcu(value, vars, lang);
+}
+
+/**
+ * Minimal ICU MessageFormat support: handles ``{name}`` (plain var)
+ * and ``{n, plural, one {singular} other {plural}`` … ``}`` (plural
+ * with ``#`` as the count placeholder inside the branches).
+ *
+ * This is a deliberate subset — the project ships 6 ICU strings
+ * (reindex.banner_body + chat.tree.has_forks) and a full IntlMessageFormat
+ * dependency is overkill. Falls back gracefully on syntax errors.
+ */
+function interpolateIcu(
+  template: string,
+  vars: Record<string, number | string>,
+  lang: string,
+): string {
+  // Step 1: handle ``{name}`` — simple var replacement.
+  // Step 2: handle ``{n, plural, one {X} other {Y}…}`` — recursive
+  //   matching of nested braces for each plural branch.
+  let out = template.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? `{${k}}`));
+  // Plural form: {n, plural, one {A} other {B}}
+  out = out.replace(
+    /\{(\w+),\s*plural,\s*((?:one|other|few|many|\w+)\s*\{[^}]*\}(?:\s*(?:one|other|few|many|\w+)\s*\{[^}]*\})*)\s*\}/g,
+    (_match, name: string, body: string) => {
+      const n = Number(vars[name] ?? 0);
+      const cat = pluralCategory(n, lang);
+      // Find the branch matching cat (or 'other' as fallback).
+      const branches = parsePluralBranches(body);
+      const branchText =
+        branches[cat] ?? branches['other'] ?? branches['one'] ?? '';
+      // Replace ``#`` with the actual count inside the chosen branch.
+      return branchText.replace(/#/g, String(n));
+    },
+  );
+  return out;
+}
+
+/** Parse ``one {A} other {B} few {C}`` → ``{ one: 'A', other: 'B', few: 'C' }``. */
+function parsePluralBranches(body: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  // Match each ``<category> {<text>}`` — text may contain braces so
+  // we only match the outermost braces by scanning brace depth.
+  const re = /\b(one|other|few|many|two|few|many)\s*\{/g;
+  let m: RegExpExecArray | null;
+  let cursor = 0;
+  while ((m = re.exec(body)) !== null) {
+    const cat = m[1];
+    const start = re.lastIndex; // after the '{'
+    // Find matching closing brace.
+    let depth = 1;
+    let i = start;
+    while (i < body.length && depth > 0) {
+      const c = body[i];
+      if (c === '{') depth++;
+      else if (c === '}') depth--;
+      i++;
+    }
+    if (depth === 0) {
+      out[cat] = body.slice(start, i - 1);
+      cursor = i;
+    } else {
+      // Unbalanced — bail.
+      break;
+    }
+  }
+  return out;
+}
+
+/** Return the plural category for ``n`` in ``lang``.
+ *
+ * Uses ``Intl.PluralRules`` (available in all evergreen browsers +
+ * Node 18+) when present. Falls back to a simple n===1 check for
+ * environments without Intl support.
+ */
+function pluralCategory(n: number, lang: string): string {
+  try {
+    const rules = new Intl.PluralRules(lang);
+    return rules.select(n);
+  } catch {
+    return n === 1 ? 'one' : 'other';
+  }
 }
