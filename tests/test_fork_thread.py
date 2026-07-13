@@ -747,3 +747,75 @@ async def test_create_thread_default_parent_thread_id_is_none() -> None:
     await svc.create_thread(bot_id=1, name="Regular chat")
 
     assert threads.created[0]["parent_thread_id"] is None
+
+
+async def test_fork_round_trip_persists_parent_thread_id_in_list_for_bot(
+    fork_store,
+) -> None:
+    """End-to-end: fork sets parent_thread_id, list_for_bot reads it back.
+
+    Pairs with the unit-level fake test
+    ``test_fork_sets_parent_thread_id_to_source`` — that test catches
+    the service-side contract, this one confirms the SQL write+read
+    round-trip via the real ``SqlAlchemyThreadRepository`` chain.
+    Without it, a regression in the repo's DTO projection (Task 3
+    construction sites) would silently drop the new column on read
+    — every fork would look like a root in the API response.
+    """
+    from typing import cast
+
+    from app.infrastructure.db.models import Bot, ChatThread, Conversation
+    from app.infrastructure.repositories.sqlalchemy import (
+        SqlAlchemyMessageRepository,
+        SqlAlchemyThreadRepository,
+    )
+    from app.application.services.thread import ThreadService
+
+    async with fork_store._async_session_factory() as session:
+        bot = Bot(
+            id=None, name="regression-tree", personality="p", first_message="hi"
+        )
+        session.add(bot)
+        await session.commit()
+        await session.refresh(bot)
+        bot_id = cast(int, bot.id)
+        assert bot_id is not None
+
+        source = ChatThread(id=None, bot_id=bot_id, name="source-thread")
+        session.add(source)
+        await session.commit()
+        await session.refresh(source)
+        source_id = cast(int, source.id)
+        assert source_id is not None
+
+        session.add(
+            Conversation(
+                id=None, thread_id=source_id,
+                role="user", content="hello",
+            )
+        )
+        await session.commit()
+
+    thread_repo = SqlAlchemyThreadRepository(fork_store)
+    msg_repo = SqlAlchemyMessageRepository(fork_store)
+    svc = ThreadService(threads=thread_repo, messages=msg_repo)
+    fork_id = await svc.fork_at_message(thread_id=source_id, message_id=1)
+    assert fork_id != source_id
+
+    # Read back via list_for_bot — both threads should appear,
+    # and the fork's parent_thread_id should equal source_id.
+    all_threads = await thread_repo.list_for_bot(bot_id)
+    by_id = {t.id: t for t in all_threads}
+    assert source_id in by_id
+    assert fork_id in by_id
+    assert by_id[source_id].parent_thread_id is None  # root
+    assert by_id[fork_id].parent_thread_id == source_id  # child
+
+    # Sanity: no extra threads leaked into the listing.
+    assert len(all_threads) == 2
+
+    # Also verify the read via get() — same contract, different code
+    # path (single-row query vs. list).
+    fork_dto = await thread_repo.get(fork_id)
+    assert fork_dto is not None
+    assert fork_dto.parent_thread_id == source_id
