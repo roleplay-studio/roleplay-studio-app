@@ -140,6 +140,7 @@ class FakeThreadRepo:
         bot_id: int,
         name: str = "new chat",
         persona_id: int | None = None,
+        parent_thread_id: int | None = None,
     ) -> int:
         self._next_id += 1
         new_id = self._next_id
@@ -149,6 +150,7 @@ class FakeThreadRepo:
                 "bot_id": bot_id,
                 "name": name,
                 "persona_id": persona_id,
+                "parent_thread_id": parent_thread_id,
                 "summary": None,
             }
         )
@@ -691,3 +693,36 @@ async def test_fork_nonexistent_message_id_in_real_thread_raises_not_found(
             .all()
         )
         assert len(msgs) == 3
+
+
+# ── create_thread parent_thread_id passthrough ──────────────────
+
+
+async def test_create_thread_passes_parent_thread_id_to_repo() -> None:
+    """``create_thread`` forwards ``parent_thread_id`` to the repository.
+
+    Regression guard for the protocol passthrough. Without it, the
+    service silently drops the kwarg and the tree UI shows every
+    thread as a root.
+    """
+    source = _make_thread()  # dummy source — only used to satisfy FakeThreadRepo
+    threads = FakeThreadRepo(source_thread=source)
+    svc = ThreadService(threads=threads, messages=None)  # type: ignore[arg-type]
+
+    tid = await svc.create_thread(
+        bot_id=1, name="Forked chat", persona_id=None, parent_thread_id=42,
+    )
+
+    assert tid == 1001  # FakeThreadRepo._next_id starts at 1000, first create = 1001
+    assert threads.created[0]["parent_thread_id"] == 42
+    assert threads.created[0]["name"] == "Forked chat"
+
+
+async def test_create_thread_default_parent_thread_id_is_none() -> None:
+    """``create_thread`` without ``parent_thread_id`` passes ``None`` (root)."""
+    threads = FakeThreadRepo(source_thread=_make_thread())
+    svc = ThreadService(threads=threads, messages=None)  # type: ignore[arg-type]
+
+    await svc.create_thread(bot_id=1, name="Regular chat")
+
+    assert threads.created[0]["parent_thread_id"] is None

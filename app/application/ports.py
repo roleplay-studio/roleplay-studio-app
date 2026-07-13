@@ -111,7 +111,8 @@ class BotRepository(Protocol):
 
 class ThreadRepository(Protocol):
     async def create(
-        self, bot_id: int, name: str = "new chat", persona_id: int | None = None
+        self, bot_id: int, name: str = "new chat", persona_id: int | None = None,
+        parent_thread_id: int | None = None,
     ) -> int: ...
 
     async def get(self, thread_id: int) -> ThreadDTO | None: ...

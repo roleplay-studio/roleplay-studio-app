@@ -73,9 +73,18 @@ class ThreadService:
         await self._messages.update_content(first_asst.id, chosen)
 
     async def create_thread(
-        self, bot_id: int, name: str = "new chat", persona_id: int | None = None
+        self,
+        bot_id: int,
+        name: str = "new chat",
+        persona_id: int | None = None,
+        parent_thread_id: int | None = None,
     ) -> int:
-        thread_id = await self._threads.create(bot_id, name.strip() or "new chat")
+        thread_id = await self._threads.create(
+            bot_id,
+            name.strip() or "new chat",
+            persona_id=persona_id,
+            parent_thread_id=parent_thread_id,
+        )
         if persona_id is not None:
             await self._threads.set_persona(thread_id, persona_id)
         return thread_id

@@ -338,10 +338,19 @@ class SqlAlchemyThreadRepository:
         self._store = store
 
     async def create(
-        self, bot_id: int, name: str = "Новая беседа", persona_id: int | None = None
+        self,
+        bot_id: int,
+        name: str = "Новая беседа",
+        persona_id: int | None = None,
+        parent_thread_id: int | None = None,
     ) -> int:
         async with self._store._async_session_factory() as session:
-            thread = ChatThread(bot_id=bot_id, name=name, persona_id=persona_id)
+            thread = ChatThread(
+                bot_id=bot_id,
+                name=name,
+                persona_id=persona_id,
+                parent_thread_id=parent_thread_id,
+            )
             session.add(thread)
             await session.commit()
             await session.refresh(thread)
