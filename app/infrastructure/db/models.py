@@ -92,6 +92,16 @@ class ChatThread(SQLModel, table=True):
         default=None, foreign_key="user_personas.id", ondelete="SET NULL", nullable=True
     )
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    # Fork lineage. NULL = root thread. ON DELETE SET NULL so deleting
+    # a source thread doesn't cascade-delete its forks (forks survive
+    # independently — see the read-only-source guarantee in the fork
+    # spec, commit 848d26c).
+    parent_thread_id: int | None = Field(
+        default=None,
+        foreign_key="chat_threads.id",
+        nullable=True,
+        index=True,
+    )
 
     bot: Bot = Relationship(back_populates="threads")
     conversations: list["Conversation"] = Relationship(
