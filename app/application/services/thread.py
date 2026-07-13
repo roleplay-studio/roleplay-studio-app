@@ -356,6 +356,7 @@ class ThreadService:
             bot_id=source.bot_id,
             name=new_name,
             persona_id=source.persona_id,
+            parent_thread_id=source.id,
         )
 
         # 4. Carry the source's persisted summary across. The

@@ -432,6 +432,27 @@ async def test_fork_preserves_bot_id() -> None:
     assert threads.created[0]["bot_id"] == 42
 
 
+async def test_fork_sets_parent_thread_id_to_source() -> None:
+    """The forked thread persists ``parent_thread_id = source.id``.
+
+    This is the ONLY non-default setter of ``parent_thread_id``. If
+    this test fails, the fork UI has no way to show the source-link
+    in the thread tree — every fork would render as a root.
+    """
+    source = _make_thread(thread_id=100, name="Original")
+    msg = _make_msg(1, role="user", content="hi")
+    msgs = FakeMessageRepo(active_until=[msg])
+    threads = FakeThreadRepo(source_thread=source)
+    svc = ThreadService(threads=threads, messages=msgs)  # type: ignore[arg-type]
+
+    new_id = await svc.fork_at_message(thread_id=source.id, message_id=1)
+
+    # The repo's ``create`` was called with parent_thread_id=source.id.
+    assert len(threads.created) == 1
+    assert threads.created[0]["parent_thread_id"] == source.id
+    assert new_id == 1001  # FakeThreadRepo._next_id starts at 1000, first create = 1001
+
+
 # ── Integration test (real SQL + alembic) ─────────────────────────────
 # This test exists to catch drift between the in-memory fakes above
 # and the real SQL contract. Pitfall 6au from
