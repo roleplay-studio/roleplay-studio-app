@@ -1,6 +1,6 @@
 """Shared API request/response schemas (Pydantic models)."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.domain.enums import BotType
 
@@ -88,6 +88,52 @@ class ConfigureRequest(BaseModel):
     base_url: str = ""
     api_key: str = ""
     chat_model: str = ""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _validate_provider(cls, data: object) -> object:
+        """Reject unknown provider ids before they reach ``set_key``.
+
+        Before Phase 4 the route accepted any string and wrote it into
+        .env via ``dotenv.set_key``; a stale browser or a hand-crafted
+        HTTP client could push a bad id and crash the very next
+        ``Settings()`` call. We mirror the Settings-side validator's
+        posture: empty / non-string → 422 immediately; known
+        PROVIDERS id or 'mock' → through; anything else → 422.
+
+        ``api.constants.PROVIDERS`` is accessed via ``sys.modules`` to
+        dodge the ``api.constants ↔ app.infrastructure.config`` import
+        cycle described in Phase 1.1. By the time this validator runs
+        the module is fully loaded (we're inside an HTTP request, not
+        at import time), but the peek makes the code resilient to
+        partial state during early-boot test fixtures.
+        """
+        if not isinstance(data, dict):
+            return data
+        raw = data.get("provider", "")
+        if not isinstance(raw, str) or not raw.strip():
+            raise ValueError("provider must be a non-empty string")
+        normalised = raw.strip().lower()
+        if normalised == "mock":
+            # accept — the mock provider is special-cased
+            data = {**data, "provider": normalised}
+            return data
+        import sys as _sys
+
+        api_constants = _sys.modules.get("api.constants")
+        if api_constants is not None and hasattr(api_constants, "PROVIDERS"):
+            if normalised in api_constants.PROVIDERS:
+                data = {**data, "provider": normalised}
+                return data
+            raise ValueError(
+                f"provider={normalised!r} is not a known provider id "
+                f"(known: {sorted(api_constants.PROVIDERS.keys())}, 'mock')"
+            )
+        # Cycle case: api.constants not yet loaded. Tolerate the value
+        # provisionally; Settings.llm_provider catches it on next
+        # construction. We can't reject here without re-introducing
+        # the cycle.
+        return data
 
 
 class RegenerateRequest(BaseModel):
