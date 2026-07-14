@@ -273,7 +273,6 @@ const dict: LangDict = Object.freeze({
     'edit_message.state_label': 'Weltzustand',
     'edit_message.state_placeholder': 'Welt: Wetter, Ort, Fakten …',
     'edit_message.tab_message': 'Nachricht',
-
     'edit_message.tab_state': 'Welt',
     'edit_message.title': '✏️ Nachricht bearbeiten',
     'feature.android.desc': 'Nativer mobiler Client (in Arbeit)',
@@ -281,6 +280,7 @@ const dict: LangDict = Object.freeze({
     'feature.bots.desc': 'Charaktere mit Personas erstellen',
     'feature.bots.title': 'Eigene Bots',
     'feature.chat.desc': 'Tokens von jedem Anbieter streamen',
+
     'feature.chat.title': 'Multi-LLM-Chat',
     'feature.edit.desc': 'Nach Bearbeitung erneut senden, Verlauf behalten',
     'feature.edit.title': 'Nachrichten bearbeiten',
@@ -337,6 +337,7 @@ const dict: LangDict = Object.freeze({
     'personas.cancel': 'Abbrechen',
     'personas.create': 'Erstellen',
     'personas.delete_confirm': 'Diese Persona löschen?',
+    'personas.delete_title': 'Persona löschen',
     'personas.delete_title_tooltip': 'Löschen',
     'personas.description': 'Beschreibung',
     'personas.description_placeholder':
@@ -584,6 +585,13 @@ const dict: LangDict = Object.freeze({
     'thread.rename': 'Umbenennen',
     'thread.start': 'Chat starten',
     'thread.title': 'Threads',
+    'thread_items.message_count_one': '1 Nachricht',
+    'thread_items.message_count_other': '{n} Nachrichten',
+    'thread_items.message_count_zero': 'Keine Nachrichten',
+    'thread_sort.by_last_activity': 'Letzte Aktivität',
+    'thread_sort.by_message_count': 'Anzahl Nachrichten',
+    'thread_sort.by_name': 'Name (A–Z)',
+    'thread_sort.label': 'Sortieren nach',
   }),
 
   en: Object.freeze({
@@ -933,6 +941,7 @@ const dict: LangDict = Object.freeze({
     'personas.cancel': 'Cancel',
     'personas.create': 'Create',
     'personas.delete_confirm': 'Delete this persona?',
+    'personas.delete_title': 'Delete Persona',
     'personas.delete_title_tooltip': 'Delete',
     'personas.description': 'Description',
     'personas.edit_title': 'Edit Persona',
@@ -1149,6 +1158,13 @@ const dict: LangDict = Object.freeze({
     'thread.rename': 'Rename',
     'thread.start': 'Start Chat',
     'thread.title': 'Threads',
+    'thread_items.message_count_one': '1 message',
+    'thread_items.message_count_other': '{n} messages',
+    'thread_items.message_count_zero': 'No messages',
+    'thread_sort.by_last_activity': 'Last activity',
+    'thread_sort.by_message_count': 'Message count',
+    'thread_sort.by_name': 'Name (A–Z)',
+    'thread_sort.label': 'Sort by',
   }),
 
   fr: Object.freeze({
@@ -1323,7 +1339,7 @@ const dict: LangDict = Object.freeze({
     'chat.recent.just_now': "à l\\'instant",
     'chat.recent.last_message': 'Continuer →',
     'chat.recent.min_ago': 'il y a {n} min',
-    'chat.recent.no_chats': "Aucune conversation pour l\\'instant",
+    'chat.recent.no_chats': "Aucune conversation pour l'instant",
     'chat.recent.no_chats_hint':
       'Allez au tableau de bord et démarrez une conversation avec un bot',
     'chat.recent.no_messages': "Aucun message pour l\\'instant",
@@ -1470,6 +1486,7 @@ const dict: LangDict = Object.freeze({
     'personas.cancel': 'Annuler',
     'personas.create': 'Créer',
     'personas.delete_confirm': 'Supprimer ce persona ?',
+    'personas.delete_title': 'Supprimer le persona',
     'personas.delete_title_tooltip': 'Supprimer',
     'personas.description': 'Description',
     'personas.description_placeholder':
@@ -1718,6 +1735,13 @@ const dict: LangDict = Object.freeze({
     'thread.rename': 'Renommer',
     'thread.start': 'Démarrer la conversation',
     'thread.title': 'Fils',
+    'thread_items.message_count_one': '1 message',
+    'thread_items.message_count_other': '{n} messages',
+    'thread_items.message_count_zero': 'Aucun message',
+    'thread_sort.by_last_activity': 'Dernière activité',
+    'thread_sort.by_message_count': 'Nombre de messages',
+    'thread_sort.by_name': 'Nom (A–Z)',
+    'thread_sort.label': 'Trier par',
   }),
 
   ja: Object.freeze({
@@ -2033,6 +2057,7 @@ const dict: LangDict = Object.freeze({
     'personas.cancel': 'キャンセル',
     'personas.create': '作成',
     'personas.delete_confirm': 'このペルソナを削除しますか?',
+    'personas.delete_title': 'ペルソナを削除',
     'personas.delete_title_tooltip': '削除',
     'personas.description': '説明',
     'personas.description_placeholder':
@@ -2271,6 +2296,13 @@ const dict: LangDict = Object.freeze({
     'thread.rename': '名前を変更',
     'thread.start': 'チャットを開始',
     'thread.title': 'スレッド',
+    'thread_items.message_count_one': '1件のメッセージ',
+    'thread_items.message_count_other': '{n}件のメッセージ',
+    'thread_items.message_count_zero': 'メッセージなし',
+    'thread_sort.by_last_activity': '最新の活動',
+    'thread_sort.by_message_count': 'メッセージ数',
+    'thread_sort.by_name': '名前 (A–Z)',
+    'thread_sort.label': '並び替え',
   }),
 
   ko: Object.freeze({
@@ -2521,7 +2553,6 @@ const dict: LangDict = Object.freeze({
     'edit_message.state_label': '월드 스테이트',
     'edit_message.state_placeholder': '월드: 날씨, 장소, 사실…',
     'edit_message.tab_message': '메시지',
-
     'edit_message.tab_state': '월드',
     'edit_message.title': '✏️ 메시지 편집',
     'feature.android.desc': '네이티브 모바일 클라이언트 (개발 중)',
@@ -2529,6 +2560,7 @@ const dict: LangDict = Object.freeze({
     'feature.bots.desc': '페르소나로 캐릭터 만들기',
     'feature.bots.title': '커스텀 봇',
     'feature.chat.desc': '모든 제공업체에서 토큰 스트리밍',
+
     'feature.chat.title': '멀티 LLM 채팅',
     'feature.edit.desc': '편집 후 다시 보내고 기록 유지',
     'feature.edit.title': '메시지 편집',
@@ -2585,6 +2617,7 @@ const dict: LangDict = Object.freeze({
     'personas.cancel': '취소',
     'personas.create': '만들기',
     'personas.delete_confirm': '이 페르소나를 삭제하시겠습니까?',
+    'personas.delete_title': '페르소나 삭제',
     'personas.delete_title_tooltip': '삭제',
     'personas.description': '설명',
     'personas.description_placeholder': '캐릭터를 설명하세요 — 성격, 배경, 특성...',
@@ -2820,6 +2853,13 @@ const dict: LangDict = Object.freeze({
     'thread.rename': '이름 바꾸기',
     'thread.start': '채팅 시작',
     'thread.title': '스레드',
+    'thread_items.message_count_one': '메시지 1개',
+    'thread_items.message_count_other': '메시지 {n}개',
+    'thread_items.message_count_zero': '메시지 없음',
+    'thread_sort.by_last_activity': '최근 활동',
+    'thread_sort.by_message_count': '메시지 수',
+    'thread_sort.by_name': '이름 (A–Z)',
+    'thread_sort.label': '정렬 기준',
   }),
 
   ru: Object.freeze({
@@ -3102,7 +3142,6 @@ const dict: LangDict = Object.freeze({
     'edit_message.state_label': 'Состояние мира',
     'edit_message.state_placeholder': 'мир: погода, локация, факты…',
     'edit_message.tab_message': 'Сообщение',
-
     'edit_message.tab_state': 'Мир',
     'edit_message.title': '✏️ Редактировать сообщение',
     'feature.android.desc': 'Нативный клиент для Windows, MacOS, Android',
@@ -3110,6 +3149,7 @@ const dict: LangDict = Object.freeze({
     'feature.bots.desc': 'Создавай любимых персонажей и целые сказочные миры',
     'feature.bots.title': 'Персонажи и ассистенты',
     'feature.chat.desc': 'Стриминг токенов от любого провайдера',
+
     'feature.chat.title': 'Чат с LLM',
     'feature.edit.desc': 'Перешли после правки, история сохранится',
     'feature.edit.title': 'Редактирование',
@@ -3166,6 +3206,7 @@ const dict: LangDict = Object.freeze({
     'personas.cancel': 'Отмена',
     'personas.create': 'Создать',
     'personas.delete_confirm': 'Удалить этого персонажа?',
+    'personas.delete_title': 'Удалить персонажа',
     'personas.delete_title_tooltip': 'Удалить',
     'personas.description': 'Описание',
     'personas.description_placeholder': 'Опишите персонажа — характер, внешность, особенности...',
@@ -3386,6 +3427,13 @@ const dict: LangDict = Object.freeze({
     'thread.rename': 'Переименовать',
     'thread.start': 'Начать чат',
     'thread.title': 'Диалоги',
+    'thread_items.message_count_one': '1 сообщ.',
+    'thread_items.message_count_other': '{n} сообщ.',
+    'thread_items.message_count_zero': 'нет сообщений',
+    'thread_sort.by_last_activity': 'Последняя активность',
+    'thread_sort.by_message_count': 'Количество сообщений',
+    'thread_sort.by_name': 'Имя (А–Я)',
+    'thread_sort.label': 'Сортировать по',
   }),
 
   zh: Object.freeze({
@@ -3630,7 +3678,6 @@ const dict: LangDict = Object.freeze({
     'edit_message.state_label': '世界状态',
     'edit_message.state_placeholder': '世界：天气、地点、事实…',
     'edit_message.tab_message': '消息',
-
     'edit_message.tab_state': '世界',
     'edit_message.title': '✏️ 编辑消息',
     'feature.android.desc': '原生移动客户端（开发中）',
@@ -3638,6 +3685,7 @@ const dict: LangDict = Object.freeze({
     'feature.bots.desc': '基于人设构建角色',
     'feature.bots.title': '自定义 Bot',
     'feature.chat.desc': '接入任意提供商的流式输出',
+
     'feature.chat.title': '多 LLM 对话',
     'feature.edit.desc': '编辑后可重新发送，保留历史记录',
     'feature.edit.title': '编辑消息',
@@ -3693,6 +3741,7 @@ const dict: LangDict = Object.freeze({
     'personas.cancel': '取消',
     'personas.create': '创建',
     'personas.delete_confirm': '删除此人设？',
+    'personas.delete_title': '删除人设',
     'personas.delete_title_tooltip': '删除',
     'personas.description': '描述',
     'personas.description_placeholder': '描述你的角色 — 性格、背景、特点……',
@@ -3916,6 +3965,13 @@ const dict: LangDict = Object.freeze({
     'thread.rename': '重命名',
     'thread.start': '开始聊天',
     'thread.title': '会话',
+    'thread_items.message_count_one': '1 条消息',
+    'thread_items.message_count_other': '{n} 条消息',
+    'thread_items.message_count_zero': '无消息',
+    'thread_sort.by_last_activity': '最近活动',
+    'thread_sort.by_message_count': '消息数',
+    'thread_sort.by_name': '名称 (A–Z)',
+    'thread_sort.label': '排序方式',
   }),
 });
 

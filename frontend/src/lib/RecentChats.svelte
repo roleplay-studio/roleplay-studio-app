@@ -5,7 +5,8 @@
 
   import { thumbUrl } from './api';
   import { currentLang, t } from './i18n';
-  import { GeneratedAvatar } from './ui';
+  import { GeneratedAvatar, Select } from './ui';
+  import { sortRecentThreads, THREAD_SORT_MODE_KEYS, type ThreadSortMode } from './utils/threadSort';
 
   let lang = $state('en');
 
@@ -20,6 +21,12 @@
     onselectThread?: (botId: number, threadId: number) => void;
     threads?: RecentThread[];
   } = $props();
+
+  // ── Sort state — mirrors ThreadDrawer's dropdown. Re-using the
+  // same ThreadSortMode keeps a consistent UX across both surfaces
+  // (per-bot drawer and cross-bot recent list). ──
+  let sortMode = $state<ThreadSortMode>('by-last-activity');
+  const sortedThreads = $derived(sortRecentThreads(threads, sortMode));
 
   onMount(() => currentLang.subscribe((v) => (lang = v)));
 
@@ -80,8 +87,20 @@
       <p class="rc-empty-hint">{t('chat.recent.no_chats_hint', lang)}</p>
     </div>
   {:else}
+    {#if threads.length > 1}
+      <div class="rc-sort">
+        <Select
+          bind:value={sortMode}
+          options={[
+            { label: t(THREAD_SORT_MODE_KEYS['by-last-activity'], lang), value: 'by-last-activity' },
+            { label: t(THREAD_SORT_MODE_KEYS['by-message-count'], lang), value: 'by-message-count' },
+            { label: t(THREAD_SORT_MODE_KEYS['by-name'], lang), value: 'by-name' },
+          ]}
+        />
+      </div>
+    {/if}
     <div class="rc-list">
-      {#each threads as thread (thread.thread_id)}
+      {#each sortedThreads as thread (thread.thread_id)}
         <div class="rc-card">
           <div
             class="rc-main"
@@ -113,8 +132,10 @@
               </div>
 
               <div class="rc-bottom">
-                <p class="rc-preview" class:rc-summary={!!thread.summary}>
-                  {#if thread.summary}
+                <p class="rc-preview" class:rc-summary={!!thread.summary && !thread.last_message_short_content}>
+                  {#if thread.last_message_short_content}
+                    {truncate(thread.last_message_short_content, 100)}
+                  {:else if thread.summary}
                     {truncate(thread.summary, 120)}
                   {:else if thread.last_message_preview}
                     {truncate(thread.last_message_preview, 100)}
@@ -122,6 +143,9 @@
                     {t('chat.recent.no_messages', lang)}
                   {/if}
                 </p>
+                {#if thread.message_count > 0}
+                  <span class="rc-count">{thread.message_count}</span>
+                {/if}
                 {#if thread.persona_name}
                   <div class="rc-persona">
                     {#if thread.persona_avatar_path}
@@ -231,6 +255,15 @@
     font-size: 12px;
     color: var(--rc-text-tertiary);
     margin: 0;
+  }
+
+  /* Sort dropdown row. RecentChats renders above the list when
+     the user has multiple threads to scroll through. */
+  .rc-sort {
+    margin-bottom: 6px;
+  }
+  .rc-sort :global(.ray-select-container) {
+    width: 100%;
   }
 
   /* ─── List ─── */
@@ -356,6 +389,20 @@
     height: 16px;
     border-radius: 4px;
     object-fit: cover;
+  }
+  /* Message count pill — small numeric badge inline with the preview row.
+     Numeric font-feature variant keeps digits monospace so the row
+     doesn't jiggle as counts change. */
+  .rc-count {
+    flex-shrink: 0;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--rc-text-secondary, #6e6e73);
+    background: color-mix(in srgb, var(--rc-text, #1d1d1f) 6%, transparent);
+    padding: 1px 6px;
+    border-radius: 86px;
+    font-feature-settings: 'tnum' 1;
+    letter-spacing: 0.2px;
   }
   .rc-persona-placeholder {
     width: 16px;
