@@ -1,13 +1,44 @@
 """Per-provider LLM subclasses.
 
-Each module is a thin subclass of ``BaseOpenAICompatibleLLM`` (or,
-eventually, ``BaseAnthropicLLM`` once populated). Subclasses supply
-provider-specific metadata only — default ``base_url``, default chat
-``model``, optional auth-header tweaks. All transport / streaming /
-reasoning / usage logic lives in the base class.
+Each module is a thin subclass of :class:`ProviderLLM` which itself
+inherits from :class:`app.infrastructure.llm.base_openai.BaseOpenAICompatibleLLM`.
+Subclasses add no behaviour — they only set ``provider_id`` so the
+base can pull defaults from ``api.constants.PROVIDERS``.
 
-Phase 1 of the LLM-provider refactor only ships ``openrouter``; the
-remaining eight OpenAI-compatible providers (openai / lm-studio /
-deepseek / gigachat / grok / kimi / minimax / yandexgpt / z-ai) are
-added in Phase 2.
+Public surface (consumed by the bootstrap factory in Phase 3):
+
+* :class:`OpenRouterLLM` — hand-written subclass with hard-coded
+  default_base_url (deployed first, Phase 1.3).
+* :class:`OpenAILLM`, :class:`LMStudioLLM`, :class:`DeepSeekLLM`,
+  :class:`GigaChatLLM`, :class:`GrokLLM`, :class:`KimiLLM`,
+  :class:`MiniMaxLLM`, :class:`YandexGPTLLM`, :class:`ZAILLM` —
+  registry-driven subclasses (Phase 2).
 """
+
+from __future__ import annotations
+
+from app.infrastructure.llm.providers._provider_llm import ProviderLLM
+from app.infrastructure.llm.providers.deepseek import DeepSeekLLM
+from app.infrastructure.llm.providers.gigachat import GigaChatLLM
+from app.infrastructure.llm.providers.grok import GrokLLM
+from app.infrastructure.llm.providers.kimi import KimiLLM
+from app.infrastructure.llm.providers.lm_studio import LMStudioLLM
+from app.infrastructure.llm.providers.minimax import MiniMaxLLM
+from app.infrastructure.llm.providers.openai import OpenAILLM
+from app.infrastructure.llm.providers.openrouter import OpenRouterLLM
+from app.infrastructure.llm.providers.yandexgpt import YandexGPTLLM
+from app.infrastructure.llm.providers.z_ai import ZAILLM
+
+__all__ = [
+    "ZAILLM",
+    "DeepSeekLLM",
+    "GigaChatLLM",
+    "GrokLLM",
+    "KimiLLM",
+    "LMStudioLLM",
+    "MiniMaxLLM",
+    "OpenAILLM",
+    "OpenRouterLLM",
+    "ProviderLLM",
+    "YandexGPTLLM",
+]
