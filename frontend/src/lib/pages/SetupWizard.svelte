@@ -12,7 +12,7 @@
   import StepProvider from './setup/StepProvider.svelte';
   import StepRag from './setup/StepRag.svelte';
   import StepWelcome from './setup/StepWelcome.svelte';
-  import { wizardState } from './setup/wizardState.svelte';
+  import { type Provider, wizardState } from './setup/wizardState.svelte';
   import WizardStepper from './setup/WizardStepper.svelte';
 
   // Sync currentLang store with wizardState.editLanguage so global
@@ -33,9 +33,25 @@
         fetch(`${API_BASE}/api/setup/starter-bots`),
       ]);
       if (provRes.ok) {
-        wizardState.providers = await provRes.json();
+        // Phase 1.5a: the response is now { providers: [...],
+        // selected_provider: "<id>" }. The wizard uses the
+        // server-side selected_provider to restore the user's
+        // previous choice on reload, instead of clobbering it
+        // with whatever happens to be `providers[0].id` (which
+        // was always 'custom' or 'openrouter' depending on the
+        // iteration order).
+        const data: { providers: Provider[]; selected_provider: string } = await provRes.json();
+        wizardState.providers = data.providers;
         if (wizardState.providers.length > 0) {
-          wizardState.selectedProvider = wizardState.providers[0].id;
+          // Honour the server's selection when it points at a
+          // known provider; fall back to whatever is the first
+          // catalog entry if the server's claim is unknown
+          // (defensive — keeps the dropdown on a valid id even
+          // if Settings and the catalog drift apart).
+          const knownIds = new Set(wizardState.providers.map((p) => p.id));
+          wizardState.selectedProvider = knownIds.has(data.selected_provider)
+            ? data.selected_provider
+            : wizardState.providers[0].id;
           updateDefaults();
         }
       }

@@ -23,6 +23,16 @@ export interface Provider {
   needs_key: boolean;
 }
 
+/**
+ * Phase 1.5a: the backend now wraps the catalog list in an object
+ * so the wizard can restore the user's prior provider choice on
+ * reload. See `api/routes/setup.py::list_providers`.
+ */
+export interface ProvidersResponse {
+  providers: Provider[];
+  selected_provider: string;
+}
+
 export interface LangOption {
   id: string;
   label: string;

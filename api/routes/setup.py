@@ -24,14 +24,35 @@ router = APIRouter()
 
 @router.get("/providers")
 async def list_providers():
-    """Return available LLM providers (every per-provider catalog, plus the ``custom`` shim).
+    """Return available LLM providers + the one currently selected.
 
-    The shape is identical to the legacy :data:`api.constants.PROVIDERS`
-    response — the SetupWizard's ``wizardState.Provider`` interface
-    reads the same fields. Migration to per-file catalogs is invisible
-    to the frontend.
+    Response shape::
+
+        {
+            "providers": [<catalog dictionaries …>],
+            "selected_provider": "deepseek",          # the id from
+                                                       # Settings.llm_provider
+                                                       # — i.e. what's
+                                                       # actually in
+                                                       # .env right now
+        }
+
+    Phase-1.5a: previously this endpoint returned a bare list and
+    the SetupWizard initialised its dropdown with
+    ``wizardState.providers[0].id`` — the first provider in
+    alphabetical order, which on the old dict-based registry was
+    ``custom`` and on the new catalog-based ordering is
+    ``custom`` too. The wizard ignored whatever the operator had
+    saved to ``.env`` last session. This change ships the
+    currently-selected id alongside the catalog so the wizard can
+    restore it on reload instead of clobbering the user's choice
+    with whatever happens to sort first.
     """
-    return catalogs_as_wizard_list()
+    settings = Settings.from_env()
+    return {
+        "providers": catalogs_as_wizard_list(),
+        "selected_provider": settings.llm_provider,
+    }
 
 
 def _defaults_for_provider(provider_id: str) -> dict[str, object]:

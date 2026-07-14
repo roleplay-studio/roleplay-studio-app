@@ -43,7 +43,9 @@ class _NoopContainer:
 
 
 @pytest.fixture
-def client(monkeypatch: pytest.MonkeyPatch, tmp_path) -> Iterator[TestClient]:
+def client(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> Iterator[TestClient]:
     """Isolated TestClient — overrides DI, redirects .env writes to tmp_path."""
     # Direct the route's data_dir at tmp_path so it doesn't touch the
     # real .env file (or create one in cwd). ``data_dir`` in the route
@@ -109,11 +111,25 @@ def test_configure_rejects_empty_provider(client: TestClient) -> None:
     assert 400 <= resp.status_code < 500
 
 
-def test_configure_providers_endpoint_returns_consistent_set(client: TestClient) -> None:
-    """/providers already exists — verify it still works and includes every key from the registry."""
+def test_configure_providers_endpoint_returns_consistent_set(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``/providers`` returns every catalog from the registry AND the
+    provider currently selected by :class:`Settings.llm_provider`
+    (Phase 1.5a — wizard restores the user's prior choice on reload
+    instead of clobbering it with ``providers[0].id``)."""
+    monkeypatch.setenv("LLM_PROVIDER", "deepseek")
     resp = client.get("/api/setup/providers")
     assert resp.status_code == 200
-    listed_ids = {p["id"] for p in resp.json()}
+    body = resp.json()
+    # Phase 1.5a: shape is now a dict, not a bare list. The catalog
+    # list sits under ``providers`` and the currently-selected id
+    # (read from Settings.llm_provider) under ``selected_provider``.
+    assert set(body) == {"providers", "selected_provider"}, (
+        f"unexpected /providers response keys: {set(body)}"
+    )
+    listed_ids = {p["id"] for p in body["providers"]}
     assert set(PROVIDERS.keys()) <= listed_ids, (
         f"missing from /providers: {set(PROVIDERS.keys()) - listed_ids}"
     )
+    assert body["selected_provider"] == "deepseek"
