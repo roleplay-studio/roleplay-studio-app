@@ -119,9 +119,52 @@ class ThreadRepository(Protocol):
 
     async def list_for_bot(self, bot_id: int) -> list[ThreadDTO]: ...
 
+    async def list_for_bot_with_preview(self, bot_id: int) -> list[ThreadDTO]:
+        """Thread listing enriched with preview fields.
+
+        Identical contract to ``list_for_bot`` BUT each returned
+        ``ThreadDTO`` also carries the preview fields (``message_count``,
+        ``last_message_at``, ``last_message_preview``, ``last_message_role``,
+        ``persona_avatar_path``) populated by a single LEFT JOIN +
+        correlated subquery SQL.
+
+        The frontend thread-list views (Drawer / Sortable sidebar /
+        Dashboard) prefer this over ``list_for_bot`` because they
+        previously had to fire N+1 ``GET /api/threads/{id}/stats``
+        requests just to show a count badge next to each row. With this
+        endpoint + sort-by-count, that's one round-trip.
+
+        The repository owns the implementation: it executes a single
+        query (no N+1), so callers don't need to worry about fan-out.
+
+        See :class:`ThreadDTO` for the field semantics.
+        """
+        ...
+
     async def list_recent(
         self, limit: int = 20, bot_id: int | None = None
     ) -> list[RecentThreadDTO]: ...
+
+    async def list_recent_with_previews(
+        self,
+        limit: int = 30,
+        bot_id: int | None = None,
+        before_thread_id: int | None = None,
+    ) -> list[RecentThreadDTO]:
+        """Cross-bot thread listing enriched with preview + message counts.
+
+        Sort order is newest-activity-first (last_message_at DESC,
+        falling back to t.created_at DESC).
+
+        ``before_thread_id`` enables keyset pagination: pass the id of
+        the last thread in the previous page to fetch the next page
+        older than it. Used by the frontend's infinite-scroll sentinel
+        (attachInfiniteScroll) when the cross-bot list exceeds the
+        first page.
+
+        See :class:`RecentThreadDTO` for the field semantics.
+        """
+        ...
 
     async def rename(self, thread_id: int, name: str) -> None: ...
 

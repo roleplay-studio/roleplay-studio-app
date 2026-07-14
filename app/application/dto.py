@@ -204,6 +204,34 @@ class ThreadDTO(BaseModel):
     created_at: datetime | None = None
     # FK to the thread this one was forked from. None for root threads.
     parent_thread_id: int | None = None
+    # ── Preview fields populated by list_with_preview / list_recent_threads
+    # ── These are denormalised for the thread-list UI; the source of
+    # truth remains in the messages and personas tables. None on the
+    # legacy /api/bots/{id}/threads endpoint may return None until the
+    # call sites are migrated to the enriched method.
+    #
+    # message_count: total active-chain messages (branch_group IS NULL OR
+    #   is_active). Distinct from ThreadStatsDTO which counts the
+    #   generation_status='complete' subset; here we count every message
+    #   that's still part of the displayed chain.
+    message_count: int = 0
+    # last_message_at: timestamp of the most recent active message in the
+    #   thread. Used by sort-by-last and group-by-bot orderings.
+    last_message_at: datetime | None = None
+    # last_message_preview: short_content of the most recent
+    #   ``role='assistant'`` active message (preferred over ``content`` —
+    #   short_content is the Summarizer's compact form). When the
+    #   summarizer hasn't run yet, this is null and the UI falls back to
+    #   ``summary``.
+    last_message_preview: str | None = None
+    # last_message_role: 'user' | 'assistant' | 'system' of the most
+    #   recent active message. Lets the UI decide icon/avatar without a
+    #   second join.
+    last_message_role: str | None = None
+    # persona_avatar_path: avatar of the persona the bot is talking to.
+    #   Same semantics as Persona.avatar_path — null means no avatar
+    #   uploaded, NOT "no persona".
+    persona_avatar_path: str | None = None
 
 
 class ThreadStatsDTO(BaseModel):
@@ -226,7 +254,14 @@ class ThreadStatsDTO(BaseModel):
 
 
 class RecentThreadDTO(BaseModel):
-    """A thread with bot info, persona name, and last message preview."""
+    """A thread with bot info, persona name, and last message preview.
+
+    Used by the cross-bot recent-chats view (Dashboard sidebar +
+    Chat.svelte fallback view). Populated by the same enriched
+    list_recent_threads SQL as ThreadDTO preview fields; backend-side
+    cost is one query (LEFT JOIN + LATERAL subqueries) for the whole
+    list.
+    """
 
     thread_id: int
     bot_id: int
@@ -239,6 +274,17 @@ class RecentThreadDTO(BaseModel):
     last_message_preview: str = ""
     summary: str | None = None
     last_message_at: datetime | None = None
+    # message_count: total active-chain messages (see ThreadDTO field
+    # for the exact filter). Distinct from "thread has any messages"
+    # — a thread with 200 historical messages and 0 active has
+    # message_count=0.
+    message_count: int = 0
+    # last_message_short_content: short_content of the most recent
+    # assistant message. Preferred over last_message_preview when the
+    # Summarizer has run, because short_content is structured for the
+    # list-row slot. UI precedence: short_content → preview → summary
+    # → empty.
+    last_message_short_content: str | None = None
 
 
 # ── Bot commands ────────────────────────────────────────────────────

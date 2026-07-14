@@ -58,9 +58,23 @@ async def set_first_message(
 
 
 @router.get("/recent", response_model=list[RecentThreadDTO])
-async def list_recent_threads(container: ContainerDep, limit: int = 20, bot_id: int | None = None):
-    """Get recent threads with bot info, persona name, and last message preview."""
-    return await container.threads.list_recent_threads(limit, bot_id=bot_id)
+async def list_recent_threads(
+    container: ContainerDep,
+    limit: int = 30,
+    bot_id: int | None = None,
+    before_thread_id: int | None = None,
+):
+    """Get recent threads with bot info, persona name, last-message preview, and message count.
+
+    ``before_thread_id`` is the keyset-pagination cursor: pass the id
+    of the last thread in the current page to fetch the next older
+    page. Used by the frontend infinite-scroll sentinel
+    (``attachInfiniteScroll``). Stop fetching when the returned list
+    has fewer than ``limit`` rows — that's the end of history.
+    """
+    return await container.threads.list_recent_threads(
+        limit=limit, bot_id=bot_id, before_thread_id=before_thread_id,
+    )
 
 
 # ── Thread CRUD ──────────────────────────────────────────────────────
