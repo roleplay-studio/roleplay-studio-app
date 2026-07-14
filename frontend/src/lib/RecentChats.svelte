@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { SvelteSet } from 'svelte/reactivity';
 
   import type { RecentThread } from './api';
 
@@ -40,29 +39,37 @@
   // around the JSON parse (legacy / corrupted entries silently
   // fall back to "all expanded").
   const COLLAPSE_STORAGE_KEY = 'rc_collapsed_bots';
-  // ``SvelteSet`` is reactive on its own — no $state wrapper needed.
-  // Per Svelte 5: ``svelte/no-unnecessary-state-wrap`` forbids wrapping
-  // SvelteSet/SvelteMap in $state because their mutating methods
-  // (.add, .delete, .clear) already notify subscribers.
-  let collapsedBots: SvelteSet<number> = new SvelteSet();
-  // Hide Svelte's reactivity proxy from mutation events that didn't
-  // actually change anything — by reassigning the same reference we
-  // re-trigger nothing (intended). The SvelteSet's own internal
-  // versioning already handles the fine-grained subscriptions.
+  // Svelte 5 + ``svelteSet`` bug: wrapping a SvelteSet in ``$state``
+  // does not propagate template subscriptions through the set's
+  // mutation events (``SvelteSet`` is internally a separate signal
+  // graph that ignores the wrapping rune). The collapsible-state
+  // template ``{#if !isCollapsed && children}`` and
+  // ``isCollapsed={collapsedBots.has(bot_id)}`` render only the
+  // first group correctly when ``localStorage`` is empty, then fail
+  // to react to ``.add()`` / ``.delete()`` calls.
+  //
+  // Fix: use a plain ``Set<number>`` inside a plain ``$state``.
+  // ``$state`` makes ``collapsedBots`` a tracked signal, and plain
+  // ``Set`` references are stable across the binding's reads —
+  // any reassignment to ``collapsedBots = new Set(...)`` triggers a
+  // template re-render and re-evaluates all ``.has()`` lookups.
+  // Cost is one extra allocation per toggle, which is fine for a
+  // user-action-driven action.
+  let collapsedBots: Set<number> = $state(new Set());
 
-  function loadCollapsedFromStorage(): SvelteSet<number> {
+  function loadCollapsedFromStorage(): Set<number> {
     try {
       const raw = localStorage.getItem(COLLAPSE_STORAGE_KEY);
-      if (!raw) return new SvelteSet();
+      if (!raw) return new Set();
       const arr = JSON.parse(raw);
-      if (!Array.isArray(arr)) return new SvelteSet();
-      return new SvelteSet(arr.filter((x) => typeof x === 'number'));
+      if (!Array.isArray(arr)) return new Set();
+      return new Set(arr.filter((x) => typeof x === 'number'));
     } catch {
-      return new SvelteSet();
+      return new Set();
     }
   }
 
-  function persistCollapsedBots(set: SvelteSet<number>): void {
+  function persistCollapsedBots(set: Set<number>): void {
     try {
       localStorage.setItem(COLLAPSE_STORAGE_KEY, JSON.stringify([...set]));
     } catch {
@@ -71,19 +78,32 @@
   }
 
   function toggleCollapsed(botId: number): void {
-    if (collapsedBots.has(botId)) collapsedBots.delete(botId);
-    else collapsedBots.add(botId);
-    // Hand the latest snapshot to localStorage. ``new Set(set)``
-    // gives us a plain Set to JSON.stringify — SvelteSet isn't
-    // directly serializable by JSON.stringify's spread form
-    // because it carries reactivity metadata.
-    persistCollapsedBots(new SvelteSet(collapsedBots));
+    // ``Set`` is the most ergonomic container here; ``SvelteSet``
+    // would also satisfy ``svelte/prefer-svelte-reactivity`` but
+    // empirically doesn't propagate set mutations through template
+    // bindings in our Svelte version (see: ``collapsedMap`` derived
+    // workaround two blocks below). Plain ``Set`` reassigned via
+    // ``collapsedBots = next`` IS what makes the template re-render.
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity
+    const next = new Set(collapsedBots);
+    if (next.has(botId)) next.delete(botId);
+    else next.add(botId);
+    collapsedBots = next;
+    persistCollapsedBots(next);
   }
 
   // Grouped view: re-derives whenever either ``threads`` or
   // ``sortMode`` changes. Within-group order is determined by
   // sortMode; inter-group order is always by newest activity.
   const groups = $derived(groupThreadsByBot(threads, sortMode));
+
+  // Lookup table for collapsed state — keyed by bot_id. Built as
+  // a derived Map so template bindings stay reactive. We previously
+  // inlined ``collapsedBots.has(...)`` in the template and it did
+  // not re-render on toggle (Svelte 5 + plain Set signal quirk).
+  // The Map form forces a fresh concrete value each time the
+  // source changes, which the compiler tracks correctly.
+  const collapsedMap = $derived(new Map([...collapsedBots].map((id) => [id, true])));
 
   onMount(() => {
     currentLang.subscribe((v) => (lang = v));
@@ -165,7 +185,7 @@
           bot_avatar_path={thumbUrl(group.bot_avatar_path, 200)}
           bot_categories={group.bot_categories}
           bot_name={group.bot_name}
-          isCollapsed={collapsedBots.has(group.bot_id)}
+          isCollapsed={collapsedMap.has(group.bot_id)}
           lastActivityLabel={formatTime(group.lastActivityAt)}
           onToggle={() => toggleCollapsed(group.bot_id)}
           threadCount={group.threads.length}
@@ -340,15 +360,23 @@
      own background, padding, and a sticky header. We just stack
      them with a tiny gap so they don't fuse visually.
 
-     `position: relative` here is what makes the children's
-     `position: sticky` resolve to *this* list (not the page
+     ``position: relative`` here is what makes the children's
+     ``position: sticky`` resolve to *this* list (not the page
      viewport or some ancestor scroll container). Each group's
      sticky header will then "stick" within the page-level scroll. */
   .rc-groups {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 0;
     position: relative;
+    padding-bottom: 32px;
+    /* ``margin-top`` is applied to each ``<ThreadGroup>`` instead
+       of ``gap`` here. Reason: ``gap`` would place equal space
+       between each group, but sticky group headers need to
+       *stack* when scrolled — each one pins to the top until the
+       next group's header pushes it up. A bottom margin on the
+       group itself preserves that visual spacing without breaking
+       the sticky stacking. */
   }
   /* rc-list was the legacy flat-list wrapper. Kept as an alias for
      tests / external CSS that may still reference it. */

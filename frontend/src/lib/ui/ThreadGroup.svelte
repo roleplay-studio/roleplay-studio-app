@@ -100,18 +100,64 @@
 <style>
   .tg {
     /* Sticky so the group header stays visible while the user
-       scrolls through long thread lists. backdrop-blur gives the
-       glass effect that masks the rows below. */
+       scrolls through long thread lists. ``backdrop-filter: blur``
+       gives the glass effect on the solid ``--ray-surface``
+       background — fully opaque to prevent rows from leaking
+       through the header strip during scroll.
+
+       ``isolation: isolate`` + ``will-change: transform`` create
+       a new stacking context that forces the browser to composite
+       the header's pixels BEFORE the rows behind it, eliminating
+       any ghost-text bleed. Without this, Safari/Firefox show
+       row text faintly visible through the 100% opaque surface
+       due to how they handle the sticky + filter combination. */
     position: sticky;
     top: 0;
     z-index: 2;
-    background: color-mix(in srgb, var(--tg-bg, #ffffff) 92%, transparent);
+    background: var(--ray-surface, #101111);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
-    border-bottom: 1px solid var(--tg-border-subtle, rgba(0, 0, 0, 0.04));
+    border-bottom: 1px solid var(--ray-border-card, rgba(255, 255, 255, 0.06));
+    isolation: isolate;
+    will-change: transform;
   }
+  /* Dark-mode overrides — set the surface to the dark ``--ray-*``
+     variables which are globally defined in :root.dark. Earlier
+     this reused ``var(--tg-*, #101111)`` but ``--tg-*`` are NOT
+     defined globally, so every rule landed on its light-mode
+     fallback (white surface, near-black text) and rendered the
+     group header with black text on a black background.
+     Switching the source of truth to the Raycast palette gives us
+     proper dark-mode rendering. */
   :global(.dark) .tg {
-    background: color-mix(in srgb, var(--tg-surface, #101111) 92%, transparent);
+    background: var(--ray-surface, #101111);
+  }
+  :global(.dark) .tg-body {
+    background: var(--ray-surface, #101111);
+  }
+  :global(.dark) .tg-name {
+    color: var(--ray-text, #f9f9f9);
+  }
+  :global(.dark) .tg-cat {
+    background: color-mix(in srgb, var(--ray-text, #f9f9f9) 5%, transparent);
+    color: var(--ray-text-secondary, #9c9c9d);
+  }
+  :global(.dark) .tg-count {
+    background: color-mix(in srgb, var(--ray-text, #f9f9f9) 6%, transparent);
+    color: var(--ray-text-secondary, #9c9c9d);
+  }
+  :global(.dark) .tg-activity {
+    color: var(--ray-text-tertiary, #6a6b6c);
+  }
+  :global(.dark) .tg-toggle:hover {
+    background: var(--ray-border-card, rgba(255, 255, 255, 0.06));
+  }
+  :global(.dark) .tg-toggle:focus-visible {
+    background: var(--ray-border-card, rgba(255, 255, 255, 0.06));
+  }
+  :global(.dark) .tg-avatar-placeholder {
+    background: color-mix(in srgb, var(--ray-text, #f9f9f9) 6%, transparent);
+    color: var(--ray-text-secondary, #9c9c9d);
   }
 
   .tg-toggle {
@@ -129,25 +175,45 @@
     transition: background 0.12s ease;
   }
   .tg-toggle:hover {
-    background: var(--tg-hover, rgba(0, 0, 0, 0.03));
+    background: var(--ray-border-card, rgba(0, 0, 0, 0.06));
   }
   .tg-toggle:focus-visible {
     outline: none;
-    background: var(--tg-hover, rgba(0, 0, 0, 0.03));
+    background: var(--ray-border-card, rgba(0, 0, 0, 0.06));
     box-shadow: inset 0 0 0 2px color-mix(in srgb, hsl(202, 100%, 67%) 30%, transparent);
   }
 
   .tg-avatar {
     width: 36px;
     height: 36px;
+    /* ``aspect-ratio: 1`` + ``flex-shrink: 0`` lock the box to a
+       square regardless of the uploaded image's natural aspect
+       ratio. Without ``aspect-ratio`` the img would scale to
+       100% width and stretch its intrinsic height to whatever
+       the parent container allows — observed at ~908×1365px on a
+       /#/chat recent-chats listing where the parent ``tg-toggle``
+       was a flex row stretching to fit the page. ``object-fit:
+       cover`` then crops without leaving a stretched image.
+
+       NOTE: ``.tg-avatar`` is applied both to the wrapping shape
+       AND to the ``<img>`` (we use ``<img class="tg-avatar tg-avatar-img">``
+       rather than wrapping in an extra div). The next rule
+       ``.tg-avatar-img`` overrides ``width: 100%`` so the square
+       36×36 box defined here doesn't shrink — instead the img
+       fills the box's 100%. ``aspect-ratio`` here keeps the box
+       square even when the image has no intrinsic dimension. */
+    aspect-ratio: 1 / 1;
+    flex-shrink: 0;
     border-radius: 8px;
     overflow: hidden;
-    flex-shrink: 0;
-    background: var(--tg-bg, #ffffff);
+    background: var(--ray-surface, #101111);
   }
   .tg-avatar-img {
-    width: 100%;
-    height: 100%;
+    /* The image is itself a ``.tg-avatar`` square — width/height
+       inherited from that rule. We ``object-fit: cover`` to crop.
+       ``width/height: 100%`` here would override the 36×36 box
+       and stretch the image back to fill its parent. Earlier this
+       caused 908×1365 images in the recent-chats list. */
     object-fit: cover;
   }
   .tg-avatar-placeholder {
@@ -157,8 +223,8 @@
     font-family: 'Maple Mono', monospace;
     font-size: 16px;
     font-weight: 600;
-    color: var(--tg-text-secondary, #6e6e73);
-    background: color-mix(in srgb, var(--tg-text, #1d1d1f) 6%, transparent);
+    color: var(--ray-text-secondary, #6e6e73);
+    background: color-mix(in srgb, var(--ray-text, #1d1d1f) 6%, transparent);
   }
 
   .tg-info {
@@ -177,7 +243,7 @@
   .tg-name {
     font-size: 13px;
     font-weight: 600;
-    color: var(--tg-text, #1d1d1f);
+    color: var(--ray-text, #1d1d1f);
     letter-spacing: 0.2px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -191,8 +257,8 @@
     font-weight: 500;
     padding: 1px 7px;
     border-radius: 86px;
-    background: color-mix(in srgb, var(--tg-text, #1d1d1f) 5%, transparent);
-    color: var(--tg-text-secondary, #6e6e73);
+    background: color-mix(in srgb, var(--ray-text, #1d1d1f) 5%, transparent);
+    color: var(--ray-text-secondary, #6e6e73);
     letter-spacing: 0.3px;
     flex-shrink: 0;
   }
@@ -204,8 +270,8 @@
     font-family: 'Maple Mono', monospace;
     font-size: 10px;
     font-weight: 600;
-    color: var(--tg-text-secondary, #6e6e73);
-    background: color-mix(in srgb, var(--tg-text, #1d1d1f) 6%, transparent);
+    color: var(--ray-text-secondary, #6e6e73);
+    background: color-mix(in srgb, var(--ray-text, #1d1d1f) 6%, transparent);
     padding: 1px 6px;
     border-radius: 86px;
     font-feature-settings: 'tnum' 1;
@@ -218,7 +284,7 @@
     align-items: center;
     gap: 6px;
     font-size: 11px;
-    color: var(--tg-text-tertiary, #86868b);
+    color: var(--ray-text-tertiary, #86868b);
   }
   .tg-activity {
     letter-spacing: 0.2px;
@@ -239,11 +305,16 @@
 
   /* Body section — relative+lower z-index so the sticky header
      floats above the rows; each row gets a subtle top padding so
-     the sticky header doesn't visually clip the first row. */
+     the sticky header doesn't visually clip the first row.
+
+     Background reads from ``--ray-surface`` (dark by default)
+     so dark mode renders correctly. Earlier this used
+     ``var(--tg-bg, #ffffff)`` which had no global definition
+     and rendered white body even in dark mode. */
   .tg-body {
     position: relative;
     z-index: 1;
     padding-top: 2px;
-    background: var(--tg-bg, #ffffff);
+    background: var(--ray-surface, #101111);
   }
 </style>

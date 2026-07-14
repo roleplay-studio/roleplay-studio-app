@@ -298,7 +298,7 @@
 {:else if needsSetup}
   <SetupWizard />
 {:else}
-  <div class="flex min-h-screen bg-theme text-theme">
+  <div class="flex min-h-screen h-screen bg-theme text-theme">
     {#if $sidebarOpen && $isMobile}
       <!-- Mobile backdrop -->
       <div
@@ -310,7 +310,7 @@
     <Sidebar {currentRoute} />
 
     <main
-      class="flex-1 w-full overflow-hidden transition-all duration-300 ml-15"
+      class="flex-1 w-full overflow-y-auto transition-all duration-300 ml-15 min-h-0"
       class:md:ml-[220px]={$sidebarOpen}
     >
       <div class="w-full relative">
