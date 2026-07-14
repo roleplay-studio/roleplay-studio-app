@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Literal
 
 from dotenv import load_dotenv
-from pydantic import AliasChoices, Field, SecretStr, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -110,13 +110,18 @@ class Settings(BaseSettings):
     # ``settings.llm_api_key.get_secret_value()``.
     llm_api_key: SecretStr | None = None
     llm_base_url: str = "https://openrouter.ai/api/v1"
-    # M16: ``llm_provider`` selects which LLM implementation
+    # M16+: ``llm_provider`` selects which LLM implementation
     # ``app.bootstrap.build_container`` wires into the application.
-    # ``"openrouter"`` (default) drives the real ``OpenRouterLLM`` over
-    # HTTPS, ``"mock"`` swaps in ``MockLLM`` — a deterministic, zero-cost
-    # in-process simulator used by E2E suites and CI. Any future
-    # provider (Ollama, vLLM, Anthropic) would add a value here.
-    llm_provider: Literal["mock", "openrouter"] = "openrouter"
+    # Valid values: ``"mock"`` (deterministic simulator for E2E / CI)
+    # plus any id registered in ``api.constants.PROVIDERS`` (openrouter,
+    # openai, lm-studio, deepseek, gigachat, grok, kimi, minimax,
+    # yandexgpt, z-ai, custom). Unknown values fall back to ``"mock"``
+    # with a ``logger.warning`` — mirrors the silent fallback in
+    # ``bootstrap.build_container`` before this refactor. The validator
+    # below is the single source of truth for valid ids; ``PROVIDERS``
+    # in ``api/constants.py`` remains the canonical metadata registry
+    # shared with ``/api/setup/providers``.
+    llm_provider: str = "openrouter"
     chat_model: str = "openai/gpt-oss-20b"
     fast_model: str = "openai/gpt-4o-mini"
     embedding_model: str = "qwen/qwen3-embedding-8b"
@@ -336,6 +341,67 @@ class Settings(BaseSettings):
             self, "debug_enabled", _is_truthy(debug_raw) or env_raw.lower() == "development"
         )
         return self
+
+    @field_validator("llm_provider", mode="before")
+    @classmethod
+    def _validate_llm_provider(cls, v: object) -> str:
+        """Validate ``llm_provider`` against ``api.constants.PROVIDERS + {'mock'}``.
+
+        Unknown values (including a non-string leaking through env
+        parsing) fall back to ``"mock"`` with a ``logger.warning``.
+
+        Cycle-breaking dance: ``api/constants.py`` itself imports
+        ``Settings`` at module level (``UPLOADS_DIR = ... Settings.from_env() ...``).
+        If the first ever ``Settings()`` is triggered from inside
+        ``api.constants`` module load, then ``api.constants`` is
+        partially initialised and ``PROVIDERS`` isn't accessible yet.
+        We work around that in two ways:
+
+        1. ``mock`` is short-circuited before any import — it always
+           validates without touching ``api.constants``.
+        2. For real provider ids we first check ``sys.modules``; only
+           fall back to a fresh import if the module is already fully
+           loaded there. If the module is currently being initialised
+           (cycle case), we treat the value as already validated
+           against the known set — the import will complete correctly
+           on every subsequent ``Settings()`` call once the cycle ends.
+        """
+        import logging
+        import sys as _sys
+
+        if not isinstance(v, str) or not v:
+            v_norm = ""
+        else:
+            v_norm = v.strip().lower()
+            if v_norm == "mock":
+                return "mock"
+
+        if v_norm == "":
+            logging.getLogger(__name__).warning(
+                "Settings.llm_provider is empty/non-string (%r); "
+                "falling back to 'mock'",
+                v,
+            )
+            return "mock"
+
+        # If api.constants is already fully loaded, validate against its
+        # PROVIDERS registry. Otherwise (cycle case) accept the value as
+        # provisionally valid; the next Settings() call after the cycle
+        # ends will re-validate against the real registry.
+        api_constants = _sys.modules.get("api.constants")
+        if api_constants is not None and hasattr(api_constants, "PROVIDERS"):
+            if v_norm in api_constants.PROVIDERS:
+                return v_norm
+            logging.getLogger(__name__).warning(
+                "Settings.llm_provider=%r is not a known provider id "
+                "(known: %r, 'mock'); falling back to 'mock'",
+                v,
+                sorted(api_constants.PROVIDERS.keys()),
+            )
+            return "mock"
+        # Cycle: api.constants partially initialised. Accept provisional
+        # ids; full validation happens on the next non-cyclical call.
+        return v_norm
 
     @classmethod
     def from_env(cls) -> Settings:

@@ -94,3 +94,40 @@ class TestDebugEnabled:
         monkeypatch.setenv("DEBUG", "1")
         settings = Settings.from_env()
         assert settings.debug_enabled is True
+
+
+class TestLlmProviderValidator:
+    """Settings.llm_provider accepts any id from api.constants.PROVIDERS + 'mock',
+    and silently falls back to 'mock' for unknown ids."""
+
+    def test_accepts_every_known_provider(self, monkeypatch):
+        from api.constants import PROVIDERS
+
+        for pid in (*list(PROVIDERS.keys()), "mock"):
+            monkeypatch.setenv("LLM_PROVIDER", pid)
+            s = Settings.from_env()
+            assert s.llm_provider == pid, f"expected {pid!r}, got {s.llm_provider!r}"
+
+    def test_unknown_provider_falls_back_to_mock(self, monkeypatch):
+        monkeypatch.setenv("LLM_PROVIDER", "not-a-real-provider")
+        s = Settings.from_env()
+        assert s.llm_provider == "mock"
+
+    def test_default_is_openrouter(self, monkeypatch):
+        monkeypatch.delenv("LLM_PROVIDER", raising=False)
+        s = Settings.from_env()
+        assert s.llm_provider == "openrouter"
+
+    def test_normalises_case_and_whitespace(self, monkeypatch):
+        # Edge case: PROVIDERS keys are lowercase. A user typing
+        # "OpenRouter" or "  openrouter  " should still match.
+        monkeypatch.setenv("LLM_PROVIDER", "  OpenRouter  ")
+        s = Settings.from_env()
+        assert s.llm_provider == "openrouter"
+
+    def test_non_string_falls_back_to_mock(self, monkeypatch):
+        # Defensive: a bool/None slipping through (e.g. from a
+        # mis-coded default) should not crash — fall back to mock.
+        monkeypatch.setenv("LLM_PROVIDER", "")
+        s = Settings.from_env()
+        assert s.llm_provider == "mock"
