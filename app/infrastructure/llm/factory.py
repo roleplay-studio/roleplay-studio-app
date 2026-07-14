@@ -26,6 +26,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from app.infrastructure.llm.base_openai import BaseOpenAICompatibleLLM
 from app.infrastructure.llm.providers import (
     ZAILLM,
     DeepSeekLLM,
@@ -57,6 +58,13 @@ logger = logging.getLogger(__name__)
 # ``PROVIDERS`` because it never issues a network request. It sits at
 # the top of the dispatch so we don't even attempt to instantiate
 # a network-bearing class when the operator asks for the simulator.
+# ``custom`` is special — it doesn't subclass ``ProviderLLM`` because the
+# operator supplies ``base_url`` and ``model`` at runtime; both fields
+# are required so the catalog validation in ``ProviderLLM.__init__``
+# (non-empty default_base_url) would fail otherwise. The factory
+# instantiates ``BaseOpenAICompatibleLLM`` directly when the
+# ``settings.llm_api_key`` AND a non-empty ``settings.chat_model``
+# AND a non-empty ``settings.llm_base_url`` are all present.
 _PROVIDER_CLASSES: dict[str, type[Any]] = {
     "mock": MockLLM,
     "openrouter": OpenRouterLLM,
@@ -69,6 +77,7 @@ _PROVIDER_CLASSES: dict[str, type[Any]] = {
     "minimax": MiniMaxLLM,
     "yandexgpt": YandexGPTLLM,
     "z-ai": ZAILLM,
+    "custom": BaseOpenAICompatibleLLM,
 }
 
 
@@ -136,6 +145,18 @@ def make_llm(settings: Any, model_override: str | None = None) -> Any:
     # pass None. We DO NOT pass ``llm_base_url`` from settings — that
     # would override the per-provider canonical URL with whatever
     # generic URL the operator put in their ``.env``.
+    if pid == "custom":
+        # ``custom`` is the only id whose ``base_url`` comes from
+        # ``Settings.llm_base_url`` (operator-set in .env / SetupWizard).
+        # The catalog's ``default_base_url`` is empty by design — we
+        # pass the settings value through ``base_url=`` so the base
+        # class wires it onto the httpx request.
+        return cls(
+            api_key=api_key,
+            model=model_override or getattr(settings, "chat_model", ""),
+            base_url=getattr(settings, "llm_base_url", "") or "",
+            settings=settings,
+        )
     return cls(
         api_key=api_key,
         model=chosen_model,

@@ -1,12 +1,16 @@
 """OpenRouter LLM provider — thin subclass of ``BaseOpenAICompatibleLLM``.
 
-The HTTP / streaming / reasoning logic lives in the base; this
-module only wires OpenRouter's defaults (base URL + chat-model).
+Phase 1.3 reference implementation. The HTTP / streaming / reasoning
+logic lives in the base; this module wires OpenRouter's defaults
+(base URL, default chat model, available-model list) so the
+SetupWizard's ``/api/setup/providers`` endpoint can introspect the
+provider without a side-registry.
+
 Bootstrapping passes a ``Settings`` instance the same way the
 pre-refactor ``OpenRouterLLM(settings=...)`` did — see
-``app/bootstrap.py:80-86`` — so the legacy call-sites keep working
-during the Phase 1 refactor and only get rewritten in Phase 3 to
-take provider defaults from ``api.constants.PROVIDERS["openrouter"]``.
+``app/bootstrap.py`` — so the legacy ``Settings`` constructor
+fallback (``settings=None`` lazy-resolves from env) keeps working for
+the historical test fixtures.
 """
 
 from __future__ import annotations
@@ -14,18 +18,49 @@ from __future__ import annotations
 from typing import Any
 
 from app.infrastructure.llm.base_openai import BaseOpenAICompatibleLLM
+from app.infrastructure.llm.providers._provider_llm import ProviderCatalog
+
+catalog = ProviderCatalog(
+    provider_id="openrouter",
+    label="OpenRouter",
+    description="Access many models through one API",
+    # OpenRouter isOpenAI-compatible at the wire-protocol level.
+    default_base_url="https://openrouter.ai/api/v1",
+    # ``openai/gpt-4o-mini`` is the cheapest usable flagship the
+    # gateway exposes for free-trial tier; the full model list is
+    # hundreds of entries (managed by OpenRouter themselves, not by
+    # this app). We expose a small curated subset below — the wizard
+    # also lets the operator paste a custom id.
+    default_model="openai/gpt-4o-mini",
+    available_models=(
+        "openai/gpt-4o-mini",
+        "openai/gpt-4o",
+        "anthropic/claude-3.5-sonnet",
+        "google/gemini-pro-1.5",
+        "meta-llama/llama-3.1-70b-instruct",
+    ),
+    needs_key=True,
+    manual_setup=False,
+)
 
 
 class OpenRouterLLM(BaseOpenAICompatibleLLM):
     """OpenRouter (https://openrouter.ai) — generic OpenAI-compatible.
 
-    Constructor keeps the pre-refactor signature
-    ``OpenRouterLLM(settings, model=None)`` so ``app/bootstrap.py``
-    doesn't need to change yet. The model id is resolved from the
-    override kwarg or the settings-default chain (``fast_model`` →
-    ``chat_model``) so the same code drives both the primary LLM
-    and the ``fast_llm`` summarizer.
+    Hand-written Phase-1.3 subclass with its own (settings, model)
+    constructor — NOT a ``ProviderLLM`` subclass. The reason:
+    OpenRouter needs the ``HTTP-Referer`` and ``X-Title`` headers
+    wired to settings-aware values for the OpenRouter ranking page,
+    which the generic ProviderLLM plumbing doesn't currently model.
+    Migration to ProviderLLM stays on the Phase-3.5 roadmap.
+
+    Constructing without a Settings instance falls back to
+    ``Settings.from_env()`` to preserve the historical
+    ``OpenRouterLLM(api_key="")`` test pattern.
     """
+
+    catalog = catalog  # for /api/setup/providers discovery
+    provider_id = "openrouter"
 
     def __init__(
         self,
@@ -33,16 +68,6 @@ class OpenRouterLLM(BaseOpenAICompatibleLLM):
         model: str | None = None,
         api_key: str | None = None,
     ) -> None:
-        """OpenRouter subclass — keeps the pre-refactor call shape.
-
-        ``settings=None`` is preserved as the legacy fallback: the
-        historical ``OpenRouterLLM(api_key="")`` constructor in
-        ``tests/test_reasoning_separation`` relied on it. When no
-        ``Settings`` is supplied we lazy-resolve it from the env so
-        the same default chain (``llm_api_key`` → ``chat_model`` →
-        ``llm_base_url``) applies. Tests that want full control can
-        pass a Settings fixture; tests that don't care can pass ``None``.
-        """
         if settings is None:
             from app.infrastructure.config import Settings
 

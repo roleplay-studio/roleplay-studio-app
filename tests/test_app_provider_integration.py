@@ -20,37 +20,37 @@ from __future__ import annotations
 
 import pytest
 
-from api.constants import PROVIDERS
 from app.bootstrap import build_container
 from app.infrastructure.config import Settings
 from app.infrastructure.llm.factory import make_llm
+from app.infrastructure.llm.providers.catalog import all_provider_catalogs
 
 
-@pytest.mark.parametrize("provider_id", sorted(PROVIDERS.keys()))
+@pytest.mark.parametrize(
+    "catalog", list(all_provider_catalogs()), ids=lambda c: c.provider_id
+)
 def test_settings_and_factory_round_trip_for_every_provider(
-    provider_id: str, monkeypatch: pytest.MonkeyPatch
+    catalog, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Settings(llm_provider=<id>) is honoured by the factory.
 
     We disable network: ``make_llm`` does not call ``startup()`` —
-    constructing a subclass only validates config and reads
-    ``PROVIDERS[<id>]``. Without this gate, every test would leak
-    a half-open httpx client.
+    constructing a subclass only validates config and reads the
+    catalog. Without this gate, every test would leak a half-open
+    httpx client.
 
     The bootstrap factory gives us a non-mock class for every real
     provider id (openrouter/openai/lm-studio/deepseek/gigachat/grok/
     kimi/minimax/yandexgpt/z-ai/custom).
     """
-    monkeypatch.setenv("LLM_PROVIDER", provider_id)
+    monkeypatch.setenv("LLM_PROVIDER", catalog.provider_id)
     s = Settings.from_env()
-    assert s.llm_provider == provider_id
+    assert s.llm_provider == catalog.provider_id
     llm = make_llm(s)
     assert llm is not None
-    assert llm.model_name or provider_id in PROVIDERS  # provider resolves to a real class
-    # And the subclass fills in base_url from the registry (or, for
-    # ``custom``, requires the caller to supply one — that's fine,
-    # we accept either path here).
-    expected_url = PROVIDERS[provider_id]["default_base_url"]
+    # Phase 1.5: defaults come from per-file catalogs, not from
+    # api.constants.PROVIDERS.
+    expected_url = catalog.default_base_url
     if expected_url:
         assert llm.base_url == expected_url.rstrip("/")
 

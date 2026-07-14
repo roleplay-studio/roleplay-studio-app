@@ -10,7 +10,6 @@ provider uses.
 
 from __future__ import annotations
 
-from api.constants import PROVIDERS
 from app.infrastructure.llm import (
     BaseOpenAICompatibleLLM,
     MockLLM,
@@ -88,15 +87,20 @@ def test_factory_dispatches_each_provider_id() -> None:
 def test_factory_uses_model_override_for_fast_llm() -> None:
     """When a model_override is passed, the LLM uses it instead of chat_model."""
     from app.infrastructure.llm.factory import make_llm
+    from app.infrastructure.llm.providers.catalog import find_catalog
 
     settings = _fake_settings(
         llm_provider="openai",
         chat_model="primary-model",
         fast_model="fastone",
     )
-    # Without override → subclass falls back to PROVIDERS["openai"]["default_model"].
+    # Without override → subclass falls back to the catalog's
+    # default_model (Phase 1.5 — defaults live in per-file catalogs,
+    # not in api.constants.PROVIDERS).
     primary = make_llm(settings)
-    assert primary.model == PROVIDERS["openai"]["default_model"]
+    openai_catalog = find_catalog("openai")
+    assert openai_catalog is not None, "openai catalog is mandatory"
+    assert primary.model == openai_catalog.default_model
     # With override → that exact model id is used.
     fast = make_llm(settings, model_override="fastone")
     assert fast.model == "fastone"
