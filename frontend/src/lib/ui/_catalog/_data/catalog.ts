@@ -122,6 +122,8 @@ const GlobalDropZonesDemo = (): Promise<{ default: Component }> =>
 const NavItemsDemo = (): Promise<{ default: Component }> => import('../_demos/NavItemsDemo.svelte');
 const ThreadItemsDemo = (): Promise<{ default: Component }> =>
   import('../_demos/ThreadItemsDemo.svelte');
+const ThreadGroupsDemo = (): Promise<{ default: Component }> =>
+  import('../_demos/ThreadGroupsDemo.svelte');
 const TTSButtonDemo = (): Promise<{ default: Component }> =>
   import('../_demos/TTSButtonDemo.svelte');
 
@@ -440,6 +442,81 @@ export const CATALOG: CatalogEntry[] = [
     ],
     source: 'frontend/src/lib/ui/ThreadItem.svelte',
     title: 'ThreadItem',
+  },
+  {
+    demo: ThreadGroupsDemo,
+    description:
+      'Sticky collapsible bot-section header for the cross-bot recent-chats listing. Owns no collapse state — parent passes `isCollapsed` + `onToggle` (RecentChats persists via localStorage).',
+    group: 'atomic',
+    props: [
+      {
+        description:
+          'ISO timestamp of the most recent thread in this group — used for the "active N мин назад" subtitle.',
+        name: 'lastActivityLabel',
+        required: true,
+        type: 'string',
+      },
+      {
+        description:
+          "Initial of the bot's name, used as the avatar placeholder when bot_avatar_path is null.",
+        name: 'bot_name',
+        required: true,
+        type: 'string',
+      },
+      {
+        description:
+          'Array of category tags — only the first one is rendered as a pill.',
+        name: 'bot_categories',
+        required: false,
+        type: 'string[]',
+      },
+      {
+        description: 'Bot avatar URL or null (renders a styled initial).',
+        name: 'bot_avatar_path',
+        required: true,
+        type: 'string | null',
+      },
+      {
+        description: 'Parent-controlled collapse state.',
+        name: 'isCollapsed',
+        required: true,
+        type: 'boolean',
+      },
+      {
+        description:
+          'Toggle handler — typically wires to localStorage persistence (see RecentChats).',
+        name: 'onToggle',
+        required: true,
+        type: '() => void',
+      },
+      {
+        description: 'Number of threads in the group — rendered as a pill.',
+        name: 'threadCount',
+        required: true,
+        type: 'number',
+      },
+    ],
+    snippets: [
+      {
+        code: `<ThreadGroup
+  bot_name={group.bot_name}
+  bot_avatar_path={thumbUrl(group.bot_avatar_path, 200)}
+  bot_categories={group.bot_categories}
+  threadCount={group.threads.length}
+  lastActivityLabel={formatTime(group.lastActivityAt)}
+  isCollapsed={collapsedBots.has(group.bot_id)}
+  onToggle={() => toggleCollapsed(group.bot_id)}
+>
+  {#each group.threads as thread (thread.thread_id)}
+    <RecentRow {thread} />
+  {/each}
+</ThreadGroup>`,
+        lang: 'svelte',
+        title: 'RecentChats usage',
+      },
+    ],
+    source: 'frontend/src/lib/ui/ThreadGroup.svelte',
+    title: 'ThreadGroup',
   },
   {
     demo: TextareasDemo,

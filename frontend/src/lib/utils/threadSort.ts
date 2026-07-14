@@ -43,6 +43,89 @@ export const THREAD_SORT_MODE_KEYS: Record<ThreadSortMode, string> = {
   'by-name': 'thread_sort.by_name',
 };
 
+/** Group shape produced by ``groupThreadsByBot``.
+
+   Each group represents one bot's slice of the cross-bot recent
+   listing. ``threads`` is pre-sorted by ``sortMode`` (newest first
+   for activity/count, alphabetical for name). ``lastActivityAt`` is
+   the most-recent timestamp across the group's threads — drives
+   the inter-group ordering so the user sees the most-recently-active
+   bot first.
+
+   The group's key in parent state should be ``bot_id`` so Svelte's
+   keyed-each can correctly diff groups across re-renders.
+*/
+export interface BotGroup {
+  bot_avatar_path: null | string;
+  bot_categories: string[];
+  bot_id: number;
+  bot_name: string;
+  /** ISO timestamp of the most recent thread in this group. */
+  lastActivityAt: null | string;
+  /** Threads in this group, pre-sorted by ``sortMode``. */
+  threads: RecentThread[];
+}
+
+/** Group cross-bot threads by ``bot_id``, pre-sorting threads within
+    each group by ``sortMode`` and ordering the groups themselves by
+    their newest thread's ``last_message_at`` (newest bot first).
+
+    Empty bots are dropped — ``Map.set`` only creates an entry when
+    a thread touches it, so a bot with zero threads in the input
+    won't appear in the result. Aligns with the group-by-bot UX
+    decision: don't render empty group headers.
+
+    ``sortMode`` semantics for ``by-name``:
+    - Within a group: threads sorted alphabetically by ``bot_name``
+      then ``persona_name`` (matches ``sortRecentThreads``).
+    - Across groups: groups still ordered by latest activity, so the
+      most-recently-active bot is at the top even in name-sorted mode.
+      Consistent with the user's plan choice — sort-by-name within
+      the group, activity ordering between groups.
+
+    Returns a new array — does not mutate the input.
+*/
+export function groupThreadsByBot(
+  threads: RecentThread[],
+  sortMode: ThreadSortMode,
+): BotGroup[] {
+  // 1. Sort threads first so insertion order into the Map already
+  //    matches the desired intra-group order for by-last-activity /
+  //    by-message-count. For by-name the sort handles it.
+  const sorted = sortRecentThreads(threads, sortMode);
+  // 2. Group by bot_id (Map preserves insertion order of first-seen).
+  const groups = new Map<number, BotGroup>();
+  for (const t of sorted) {
+    const existing = groups.get(t.bot_id);
+    if (existing) {
+      existing.threads.push(t);
+      // Keep group-level lastActivityAt as the most recent timestamp
+      // we observe. String compare is safe for ISO-8601 timestamps.
+      if ((t.last_message_at ?? '') > (existing.lastActivityAt ?? '')) {
+        existing.lastActivityAt = t.last_message_at;
+      }
+    } else {
+      groups.set(t.bot_id, {
+        bot_avatar_path: t.bot_avatar_path,
+        bot_categories: t.bot_categories,
+        bot_id: t.bot_id,
+        bot_name: t.bot_name,
+        lastActivityAt: t.last_message_at,
+        threads: [t],
+      });
+    }
+  }
+  // 3. Sort groups by their last-activity DESC. We use group-level
+  //    lastActivityAt so the most-recent bot always leads, regardless
+  //    of which ``sortMode`` the user picked — the sortMode only
+  //    affects intra-group order.
+  return Array.from(groups.values()).sort((a, b) => {
+    const ta = a.lastActivityAt ? Date.parse(a.lastActivityAt) : 0;
+    const tb = b.lastActivityAt ? Date.parse(b.lastActivityAt) : 0;
+    return tb - ta;
+  });
+}
+
 /** Sort for the cross-bot listing (RecentChats / Dashboard fallback). */
 export function sortRecentThreads(
   threads: RecentThread[],

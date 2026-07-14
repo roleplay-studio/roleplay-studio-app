@@ -1,12 +1,17 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { SvelteSet } from 'svelte/reactivity';
 
   import type { RecentThread } from './api';
 
   import { thumbUrl } from './api';
   import { currentLang, t } from './i18n';
-  import { GeneratedAvatar, Select } from './ui';
-  import { sortRecentThreads, THREAD_SORT_MODE_KEYS, type ThreadSortMode } from './utils/threadSort';
+  import { GeneratedAvatar, Select, ThreadGroup } from './ui';
+  import {
+    groupThreadsByBot,
+    THREAD_SORT_MODE_KEYS,
+    type ThreadSortMode,
+  } from './utils/threadSort';
 
   let lang = $state('en');
 
@@ -26,9 +31,64 @@
   // same ThreadSortMode keeps a consistent UX across both surfaces
   // (per-bot drawer and cross-bot recent list). ──
   let sortMode = $state<ThreadSortMode>('by-last-activity');
-  const sortedThreads = $derived(sortRecentThreads(threads, sortMode));
 
-  onMount(() => currentLang.subscribe((v) => (lang = v)));
+  // ── Group-collapse state ───────────────────────────────────────
+  // The user can collapse groups they're not actively reading. The
+  // Set of collapsed bot_ids is persisted across sessions via
+  // localStorage so the same muscle-memory layout is restored when
+  // they come back. Hydration happens once onMount, with try/catch
+  // around the JSON parse (legacy / corrupted entries silently
+  // fall back to "all expanded").
+  const COLLAPSE_STORAGE_KEY = 'rc_collapsed_bots';
+  // ``SvelteSet`` is reactive on its own — no $state wrapper needed.
+  // Per Svelte 5: ``svelte/no-unnecessary-state-wrap`` forbids wrapping
+  // SvelteSet/SvelteMap in $state because their mutating methods
+  // (.add, .delete, .clear) already notify subscribers.
+  let collapsedBots: SvelteSet<number> = new SvelteSet();
+  // Hide Svelte's reactivity proxy from mutation events that didn't
+  // actually change anything — by reassigning the same reference we
+  // re-trigger nothing (intended). The SvelteSet's own internal
+  // versioning already handles the fine-grained subscriptions.
+
+  function loadCollapsedFromStorage(): SvelteSet<number> {
+    try {
+      const raw = localStorage.getItem(COLLAPSE_STORAGE_KEY);
+      if (!raw) return new SvelteSet();
+      const arr = JSON.parse(raw);
+      if (!Array.isArray(arr)) return new SvelteSet();
+      return new SvelteSet(arr.filter((x) => typeof x === 'number'));
+    } catch {
+      return new SvelteSet();
+    }
+  }
+
+  function persistCollapsedBots(set: SvelteSet<number>): void {
+    try {
+      localStorage.setItem(COLLAPSE_STORAGE_KEY, JSON.stringify([...set]));
+    } catch {
+      /* swallow — quota / private-mode failures must not crash the page */
+    }
+  }
+
+  function toggleCollapsed(botId: number): void {
+    if (collapsedBots.has(botId)) collapsedBots.delete(botId);
+    else collapsedBots.add(botId);
+    // Hand the latest snapshot to localStorage. ``new Set(set)``
+    // gives us a plain Set to JSON.stringify — SvelteSet isn't
+    // directly serializable by JSON.stringify's spread form
+    // because it carries reactivity metadata.
+    persistCollapsedBots(new SvelteSet(collapsedBots));
+  }
+
+  // Grouped view: re-derives whenever either ``threads`` or
+  // ``sortMode`` changes. Within-group order is determined by
+  // sortMode; inter-group order is always by newest activity.
+  const groups = $derived(groupThreadsByBot(threads, sortMode));
+
+  onMount(() => {
+    currentLang.subscribe((v) => (lang = v));
+    collapsedBots = loadCollapsedFromStorage();
+  });
 
   let deletingId: null | number = $state(null);
 
@@ -99,99 +159,109 @@
         />
       </div>
     {/if}
-    <div class="rc-list">
-      {#each sortedThreads as thread (thread.thread_id)}
-        <div class="rc-card">
-          <div
-            class="rc-main"
-            onclick={() => onselectThread?.(thread.bot_id, thread.thread_id)}
-            role="button"
-            tabindex="0"
-            onkeydown={(e) =>
-              e.key === 'Enter' && onselectThread?.(thread.bot_id, thread.thread_id)}
-          >
-            <!-- Bot avatar -->
-            {#if thread.bot_avatar_path}
-              <img
-                src={thumbUrl(thread.bot_avatar_path, 50)}
-                alt={thread.bot_name}
-                class="rc-avatar"
-              />
-            {:else}
-              <GeneratedAvatar name={thread.bot_name} size={44} />
-            {/if}
-
-            <!-- Content -->
-            <div class="rc-content">
-              <div class="rc-top">
-                <span class="rc-name">{thread.bot_name}</span>
-                {#if thread.bot_categories.length > 0}
-                  <span class="rc-cat">{thread.bot_categories[0]}</span>
+    <div class="rc-groups">
+      {#each groups as group (group.bot_id)}
+        <ThreadGroup
+          bot_avatar_path={thumbUrl(group.bot_avatar_path, 200)}
+          bot_categories={group.bot_categories}
+          bot_name={group.bot_name}
+          isCollapsed={collapsedBots.has(group.bot_id)}
+          lastActivityLabel={formatTime(group.lastActivityAt)}
+          onToggle={() => toggleCollapsed(group.bot_id)}
+          threadCount={group.threads.length}
+        >
+          {#each group.threads as thread (thread.thread_id)}
+            <div class="rc-card">
+              <div
+                class="rc-main"
+                onclick={() => onselectThread?.(thread.bot_id, thread.thread_id)}
+                role="button"
+                tabindex="0"
+                onkeydown={(e) =>
+                  e.key === 'Enter' && onselectThread?.(thread.bot_id, thread.thread_id)}
+              >
+                <!-- Bot avatar (smaller now that we have the
+                     group-level avatar above) -->
+                {#if thread.bot_avatar_path}
+                  <img
+                    src={thumbUrl(thread.bot_avatar_path, 50)}
+                    alt={thread.bot_name}
+                    class="rc-avatar"
+                  />
+                {:else}
+                  <GeneratedAvatar name={thread.bot_name} size={32} />
                 {/if}
-                <span class="rc-time">{formatTime(thread.last_message_at)}</span>
-              </div>
 
-              <div class="rc-bottom">
-                <p class="rc-preview" class:rc-summary={!!thread.summary && !thread.last_message_short_content}>
-                  {#if thread.last_message_short_content}
-                    {truncate(thread.last_message_short_content, 100)}
-                  {:else if thread.summary}
-                    {truncate(thread.summary, 120)}
-                  {:else if thread.last_message_preview}
-                    {truncate(thread.last_message_preview, 100)}
-                  {:else}
-                    {t('chat.recent.no_messages', lang)}
-                  {/if}
-                </p>
-                {#if thread.message_count > 0}
-                  <span class="rc-count">{thread.message_count}</span>
-                {/if}
-                {#if thread.persona_name}
-                  <div class="rc-persona">
-                    {#if thread.persona_avatar_path}
-                      <img
-                        src={thumbUrl(thread.persona_avatar_path, 50)}
-                        alt=""
-                        class="rc-persona-avatar"
-                      />
-                    {:else}
-                      <div class="rc-persona-placeholder">
-                        {thread.persona_name.charAt(0).toUpperCase()}
+                <!-- Content -->
+                <div class="rc-content">
+                  <div class="rc-top">
+                    <span class="rc-name">{thread.persona_name ?? thread.bot_name}</span>
+                    <span class="rc-time">{formatTime(thread.last_message_at)}</span>
+                  </div>
+
+                  <div class="rc-bottom">
+                    <p class="rc-preview" class:rc-summary={!!thread.summary && !thread.last_message_short_content}>
+                      {#if thread.last_message_short_content}
+                        {truncate(thread.last_message_short_content, 100)}
+                      {:else if thread.summary}
+                        {truncate(thread.summary, 120)}
+                      {:else if thread.last_message_preview}
+                        {truncate(thread.last_message_preview, 100)}
+                      {:else}
+                        {t('chat.recent.no_messages', lang)}
+                      {/if}
+                    </p>
+                    {#if thread.message_count > 0}
+                      <span class="rc-count">{thread.message_count}</span>
+                    {/if}
+                    {#if thread.persona_name}
+                      <div class="rc-persona">
+                        {#if thread.persona_avatar_path}
+                          <img
+                            src={thumbUrl(thread.persona_avatar_path, 50)}
+                            alt=""
+                            class="rc-persona-avatar"
+                          />
+                        {:else}
+                          <div class="rc-persona-placeholder">
+                            {thread.persona_name.charAt(0).toUpperCase()}
+                          </div>
+                        {/if}
+                        <span>{thread.persona_name}</span>
                       </div>
                     {/if}
-                    <span>{thread.persona_name}</span>
                   </div>
-                {/if}
+                </div>
               </div>
-            </div>
-          </div>
 
-          <!-- Delete button -->
-          <button
-            class="rc-del"
-            onclick={() => handleDelete(thread.thread_id)}
-            disabled={deletingId === thread.thread_id}
-            title={t('chat.recent.delete_title', lang)}
-          >
-            {#if deletingId === thread.thread_id}
-              <span class="rc-spinner"></span>
-            {:else}
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                ><polyline points="3 6 5 6 21 6"></polyline><path
-                  d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"
-                ></path></svg
+              <!-- Delete button -->
+              <button
+                class="rc-del"
+                onclick={() => handleDelete(thread.thread_id)}
+                disabled={deletingId === thread.thread_id}
+                title={t('chat.recent.delete_title', lang)}
               >
-            {/if}
-          </button>
-        </div>
+                {#if deletingId === thread.thread_id}
+                  <span class="rc-spinner"></span>
+                {:else}
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    ><polyline points="3 6 5 6 21 6"></polyline><path
+                      d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"
+                    ></path></svg
+                  >
+                {/if}
+              </button>
+            </div>
+          {/each}
+        </ThreadGroup>
       {/each}
     </div>
   {/if}
@@ -266,7 +336,22 @@
     width: 100%;
   }
 
-  /* ─── List ─── */
+  /* Groups container — each ``<ThreadGroup>`` already carries its
+     own background, padding, and a sticky header. We just stack
+     them with a tiny gap so they don't fuse visually.
+
+     `position: relative` here is what makes the children's
+     `position: sticky` resolve to *this* list (not the page
+     viewport or some ancestor scroll container). Each group's
+     sticky header will then "stick" within the page-level scroll. */
+  .rc-groups {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    position: relative;
+  }
+  /* rc-list was the legacy flat-list wrapper. Kept as an alias for
+     tests / external CSS that may still reference it. */
   .rc-list {
     display: flex;
     flex-direction: column;
@@ -274,14 +359,19 @@
   }
 
   /* ─── Card ─── */
+  /* Inside a ``<ThreadGroup>``, the group header is sticky at the
+     top of the scroll container; we keep each card's top edge
+     clear of the sticky bar via a small top margin and a rounded
+     border so the group reads as one cohesive "block". */
   .rc-card {
     display: flex;
     align-items: stretch;
     background: var(--rc-bg-card);
     border: 1px solid var(--rc-border);
-    border-radius: 12px;
+    border-radius: 10px;
     overflow: hidden;
     transition: all 0.15s ease;
+    margin: 4px 8px 4px 8px;
   }
   .rc-card:hover {
     border-color: var(--rc-text-tertiary);
@@ -301,10 +391,13 @@
   }
 
   /* ─── Avatar ─── */
+  /* Inside a group the row-level avatar is intentionally smaller
+     than the group-level avatar: the group header carries the
+     "this is the bot" identity, the row avatar is just decoration. */
   .rc-avatar {
-    width: 44px;
-    height: 44px;
-    border-radius: 10px;
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
     object-fit: cover;
     flex-shrink: 0;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
@@ -331,17 +424,6 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .rc-cat {
-    font-size: 10px;
-    font-weight: 500;
-    padding: 1px 7px;
-    border-radius: 86px;
-    background: color-mix(in srgb, var(--rc-text) 5%, transparent);
-    color: var(--rc-text-secondary);
-    letter-spacing: 0.3px;
-    white-space: nowrap;
-    flex-shrink: 0;
   }
   .rc-time {
     font-size: 10px;
