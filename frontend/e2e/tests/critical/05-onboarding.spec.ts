@@ -19,7 +19,8 @@
  * on the cheap "did the app boot past splash?" signal catches
  * the class of bugs that take down the whole suite.
  */
-import { test, expect } from '@playwright/test';
+import { expect, test } from '@playwright/test';
+
 import { DashboardPage } from '../../pages/Dashboard.page';
 
 test('cold load: splash dissolves, sidebar renders, dashboard route is active @smoke', async ({
@@ -33,9 +34,7 @@ test('cold load: splash dissolves, sidebar renders, dashboard route is active @s
   expect(text.length).toBeGreaterThan(0);
 });
 
-test('hash navigation: switching to /bots re-renders Sidebar NavItems @smoke', async ({
-  page,
-}) => {
+test('hash navigation: switching to /bots re-renders Sidebar NavItems @smoke', async ({ page }) => {
   const base = new DashboardPage(page);
   await base.gotoRoot();
   await base.waitForAppReady();

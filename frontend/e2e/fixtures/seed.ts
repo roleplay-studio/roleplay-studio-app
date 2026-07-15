@@ -25,9 +25,9 @@
 import type { APIRequestContext } from '@playwright/test';
 
 export type SeedSummary = {
+  botIds: number[];
   categoryName: string;
   personaId: number;
-  botIds: number[];
   threadIds: number[];
 };
 
@@ -35,20 +35,35 @@ const AYA_NAME = 'Aya';
 const AYA_DESC = 'A reflective companion for evening conversations.';
 
 const BOT_LUNA = {
-  name: 'E2E-Luna',
-  personality: 'A serene dreamer who speaks in soft metaphors.',
   description: 'A nightly companion for quiet reflection.',
   first_message: 'Welcome, traveler. What weighs on your mind tonight?',
+  name: 'E2E-Luna',
+  personality: 'A serene dreamer who speaks in soft metaphors.',
   scenario: 'A moonlit study filled with old books.',
 };
 
 const BOT_KAI = {
-  name: 'E2E-Kai',
-  personality: 'A direct, witty barista with strong opinions about coffee.',
   description: 'Daytime companion — sharp, casual, encyclopedic about beans.',
   first_message: 'Hey, what are you drinking?',
+  name: 'E2E-Kai',
+  personality: 'A direct, witty barista with strong opinions about coffee.',
   scenario: 'A specialty coffee bar on a busy morning.',
 };
+
+/**
+ * Convenience: open a chat stream against an existing thread. Used by
+ * integration tests to validate SSE wiring without going through UI.
+ */
+export async function postMessage(
+  api: APIRequestContext,
+  threadId: number,
+  content: string,
+  userMessageId?: string,
+) {
+  return api.post(`/api/threads/${threadId}/messages`, {
+    data: { content, user_message_id: userMessageId },
+  });
+}
 
 export async function seedViaApi(api: APIRequestContext): Promise<SeedSummary> {
   // 1. Category — list, dedupe, append
@@ -58,7 +73,7 @@ export async function seedViaApi(api: APIRequestContext): Promise<SeedSummary> {
 
   // 2. Persona
   const personaResp = await api.post('/api/personas', {
-    data: { name: AYA_NAME, description: AYA_DESC },
+    data: { description: AYA_DESC, name: AYA_NAME },
   });
   if (!personaResp.ok()) {
     throw new Error(`persona create failed: ${personaResp.status()} ${await personaResp.text()}`);
@@ -74,9 +89,9 @@ export async function seedViaApi(api: APIRequestContext): Promise<SeedSummary> {
   const t2Id = await createThread(api, kaiId);
 
   return {
+    botIds: [lunaId, kaiId],
     categoryName: catName,
     personaId: persona.id,
-    botIds: [lunaId, kaiId],
     threadIds: [t1Id, t2Id],
   };
 }
@@ -90,22 +105,8 @@ async function createBot(api: APIRequestContext, body: typeof BOT_LUNA): Promise
 
 async function createThread(api: APIRequestContext, botId: number): Promise<number> {
   const r = await api.post(`/api/bots/${botId}/threads`, { data: {} });
-  if (!r.ok()) throw new Error(`createThread for bot ${botId} failed: ${r.status()} ${await r.text()}`);
+  if (!r.ok())
+    throw new Error(`createThread for bot ${botId} failed: ${r.status()} ${await r.text()}`);
   const j = await r.json();
   return j.id;
-}
-
-/**
- * Convenience: open a chat stream against an existing thread. Used by
- * integration tests to validate SSE wiring without going through UI.
- */
-export async function postMessage(
-  api: APIRequestContext,
-  threadId: number,
-  content: string,
-  userMessageId?: string,
-) {
-  return api.post(`/api/threads/${threadId}/messages`, {
-    data: { content, user_message_id: userMessageId },
-  });
 }

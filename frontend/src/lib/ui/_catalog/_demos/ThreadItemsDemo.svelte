@@ -1,4 +1,15 @@
-<!-- ThreadItemsDemo.svelte — isolated ThreadItem demo: normal, selected, renaming, with-persona -->
+<!-- ThreadItemsDemo.svelte — isolated ThreadItem demo.
+
+   Exercises the enriched fields introduced in Phase 2 of the
+   thread-list feature:
+   - ``message_count``     — total active-chain messages per row
+   - ``persona_avatar_path`` — persona avatar (or GeneratedAvatar fallback)
+   - ``last_message_preview`` / ``summary`` — preview text fallback chain
+   - ``persona_name``      — meta-line label
+
+   Variants cover: with-persona, selected, without-persona, multi-message,
+   empty-message, and renaming.
+-->
 <script lang="ts">
   import type { Thread } from '../../../api';
 
@@ -11,31 +22,69 @@
   const hoursAgo = (h: number) => new Date(now.getTime() - h * 3_600_000).toISOString();
   const daysAgo = (d: number) => new Date(now.getTime() - d * 86_400_000).toISOString();
 
+  // Standard thread — name, persona, counts, preview text.
   const t1: Thread = {
     bot_id: 1,
     created_at: minsAgo(5),
     id: 101,
+    last_message_at: minsAgo(3),
+    // short_content preview — what we want users to see first when present.
+    last_message_preview: '"Дмитрий нахмурился и сделал шаг назад, глядя на горящий порт."',
+    last_message_role: 'assistant',
+    message_count: 12,
     name: 'Whispers in the dark',
+    parent_thread_id: null,
+    persona_avatar_path: null,
     persona_id: 1,
     persona_name: 'Aria',
     summary: null,
   };
+  // Thread with summary fallback (older thread, no short_content yet).
   const t2: Thread = {
     bot_id: 1,
     created_at: hoursAgo(2),
     id: 102,
+    last_message_at: hoursAgo(1),
+    last_message_preview: null,
+    last_message_role: 'assistant',
+    message_count: 4,
     name: 'The merchant encounter',
+    parent_thread_id: null,
+    persona_avatar_path: null,
     persona_id: 1,
     persona_name: 'Aria',
-    summary: 'Met a friendly merchant',
+    summary: 'Met a friendly merchant on the road; traded stories over ale.',
   };
+  // No persona at all — exercises the GeneratedAvatar fallback path.
   const t3: Thread = {
     bot_id: 2,
     created_at: daysAgo(1),
     id: 103,
+    last_message_at: daysAgo(1),
+    last_message_preview: null,
+    last_message_role: 'user',
+    message_count: 0,
     name: 'Code review session',
+    parent_thread_id: null,
+    persona_avatar_path: null,
     persona_id: null,
     persona_name: null,
+    summary: null,
+  };
+  // Heavy-traffic thread — count badge reads as a real number.
+  const t4: Thread = {
+    bot_id: 1,
+    created_at: hoursAgo(8),
+    id: 104,
+    last_message_at: minsAgo(15),
+    last_message_preview: '"..." — и тут Дмитрий замолчал, ожидая ответа.',
+    last_message_role: 'assistant',
+    message_count: 666,
+    name: 'Ками настойчиво пробирается через орду гоблинов',
+    parent_thread_id: null,
+    persona_avatar_path: null,
+    persona_id: 1,
+    persona_name: 'Ками',
     summary: null,
   };
 
@@ -65,21 +114,27 @@
 
 <div class="tid-stack">
   <div class="tid-row">
-    <span class="tid-label">Normal</span>
+    <span class="tid-label">Normal — 12 сообщ., short_content preview</span>
     <div class="tid-frame">
       <ThreadItem thread={t1} timeLabel="5m" {onselect} {oncontextmenu} {ondotsclick} />
     </div>
   </div>
   <div class="tid-row">
-    <span class="tid-label">Selected</span>
+    <span class="tid-label">Selected — summary fallback</span>
     <div class="tid-frame">
       <ThreadItem thread={t2} timeLabel="2h" selected {onselect} {oncontextmenu} {ondotsclick} />
     </div>
   </div>
   <div class="tid-row">
-    <span class="tid-label">Without persona</span>
+    <span class="tid-label">Without persona — GeneratedAvatar fallback</span>
     <div class="tid-frame">
       <ThreadItem thread={t3} timeLabel="1d" {onselect} {oncontextmenu} {ondotsclick} />
+    </div>
+  </div>
+  <div class="tid-row">
+    <span class="tid-label">Heavy traffic — 666 сообщ.</span>
+    <div class="tid-frame">
+      <ThreadItem thread={t4} timeLabel="8h" {onselect} {oncontextmenu} {ondotsclick} />
     </div>
   </div>
   <div class="tid-row">

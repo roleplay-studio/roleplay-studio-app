@@ -11,7 +11,8 @@
  * test infra is broken (bad bundle, backend not booted, port
  * collision, etc.) — chasing per-feature failures here is a waste.
  */
-import { test, expect } from '@playwright/test';
+import { expect, test } from '@playwright/test';
+
 import { test as backendTest } from '../../fixtures/backend';
 
 backendTest('frontend reaches a running backend @smoke', async ({ backend }) => {

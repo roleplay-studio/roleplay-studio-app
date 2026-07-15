@@ -21,8 +21,7 @@ from app.application.services import (
 )
 from app.infrastructure.config import Settings
 from app.infrastructure.format_standart_rp_repairer import FormatStandartRpRepairer
-from app.infrastructure.llm import OpenRouterLLM
-from app.infrastructure.llm_mock import MockLLM
+from app.infrastructure.llm.factory import make_llm
 from app.infrastructure.orchestration.langgraph_orchestrator import (
     LangGraphConversationOrchestrator,
 )
@@ -69,21 +68,20 @@ def build_container(settings: Settings | None = None) -> ApplicationContainer:
     # sockets have a clean owner and an explicit close. This replaces
     # the previous ``__del__``-based cleanup (K2 in docs/review.md).
     #
-    # M16: ``Settings.llm_provider`` selects the implementation.
-    # ``"openrouter"`` (default) drives the real provider over HTTPS;
-    # ``"mock"`` swaps in ``MockLLM`` for E2E / CI where hitting a
-    # remote LLM is too expensive (rate-limit + cost) for a test suite
-    # that only cares about the wire shape, not the prose. Both paths
-    # share the same ``startup()`` / ``close()`` / ``generate_response*``
-    # contract so downstream services need no branching.
+    # Phase-3 factory dispatch: ``Settings.llm_provider`` selects the
+    # implementation. ``"mock"`` swaps in ``MockLLM`` for E2E / CI where
+    # hitting a remote LLM is too expensive (rate-limit + cost) for a
+    # test suite that only cares about the wire shape, not the prose.
+    # Any other provider id (openrouter, openai, lm-studio, deepseek,
+    # gigachat, grok, kimi, minimax, yandexgpt, z-ai) routes through
+    # the registry-driven ``ProviderLLM`` machinery and reads the
+    # per-provider ``default_base_url`` / ``default_model`` from
+    # ``api.constants.PROVIDERS``. All paths share the same
+    # ``startup()`` / ``close()`` / ``generate_response*`` contract so
+    # downstream services need no branching.
     try:
-        if settings.llm_provider == "mock":
-            logger.info("LLM provider: mock (deterministic simulator)")
-            llm = MockLLM(settings=settings)
-            fast_llm = MockLLM(settings=settings, model=settings.fast_model)
-        else:
-            llm = OpenRouterLLM(settings=settings)
-            fast_llm = OpenRouterLLM(settings=settings, model=settings.fast_model)
+        llm = make_llm(settings)
+        fast_llm = make_llm(settings, model_override=settings.fast_model)
     except (ConfigurationError, Exception):
         llm = None
         fast_llm = None

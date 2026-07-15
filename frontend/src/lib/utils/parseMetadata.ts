@@ -79,9 +79,7 @@ export function parseMessageContent(content: string): ParsedMessage {
   }
 
   if (Array.isArray(yamlParsed) && yamlParsed.length > 0) {
-    const actions = yamlParsed
-      .filter((v) => v !== null && v !== undefined)
-      .map((v) => String(v));
+    const actions = yamlParsed.filter((v) => v !== null && v !== undefined).map((v) => String(v));
     if (actions.length > 0) {
       return { actions, mainContent, notification: null, stats: null };
     }

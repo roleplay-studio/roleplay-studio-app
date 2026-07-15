@@ -200,9 +200,7 @@ describe('parseMessageContent', () => {
     // Pure JSON object — YAML's `load` returns the same value
     // here, but we want to make sure the JSON path also still
     // works (defense in depth).
-    const r = parseMessageContent(
-      'Body.\n\n---\n\n{"HP": 50, "MANA": 30}',
-    );
+    const r = parseMessageContent('Body.\n\n---\n\n{"HP": 50, "MANA": 30}');
     expect(r.stats).toHaveLength(2);
   });
 
@@ -229,9 +227,7 @@ describe('parseMessageContent', () => {
     expect(r.mainContent).toBe('Body.');
     // Branch unspecified — could be kv / bullets / notification.
     // Just verify no crash and one of the three fields populated.
-    expect(
-      r.stats !== null || r.actions !== null || r.notification !== null,
-    ).toBe(true);
+    expect(r.stats !== null || r.actions !== null || r.notification !== null).toBe(true);
   });
 
   it('YAML scalar empty/null falls through to kv chain', () => {
@@ -249,18 +245,14 @@ describe('parseMessageContent', () => {
     // line. Without stripping, js-yaml throws
     // "expected a single document in the stream, but found more"
     // and the whole block falls into the notification fallback.
-    const r = parseMessageContent(
-      'Body.\n\n---\n\n{ HP: 10, GOLD: 20000 }\n\n---',
-    );
+    const r = parseMessageContent('Body.\n\n---\n\n{ HP: 10, GOLD: 20000 }\n\n---');
     expect(r.mainContent).toBe('Body.');
     expect(r.stats).toHaveLength(2);
     expect(r.notification).toBeNull();
   });
 
   it('parses YAML mapping with trailing --- (no blank line)', () => {
-    const r = parseMessageContent(
-      'Body.\n\n---\n\n{ HP: 10, GOLD: 20000 }\n---',
-    );
+    const r = parseMessageContent('Body.\n\n---\n\n{ HP: 10, GOLD: 20000 }\n---');
     expect(r.stats).toHaveLength(2);
     expect(r.notification).toBeNull();
   });
@@ -273,17 +265,13 @@ describe('parseMessageContent', () => {
     // through to the plain-text notification fallback (yaml
     // rejects `---` mid-stream as a document separator) — but
     // crucially the data is NOT dropped.
-    const r = parseMessageContent(
-      'Body.\n\n---\n\n{ HP: 10 }\n---\n\nmore body',
-    );
+    const r = parseMessageContent('Body.\n\n---\n\n{ HP: 10 }\n---\n\nmore body');
     expect(r.notification).toBe('{ HP: 10 }\n---\n\nmore body');
     expect(r.stats).toBeNull();
   });
 
   it('parses YAML sequence with trailing --- sentinel', () => {
-    const r = parseMessageContent(
-      'Choose:\n\n---\n\n[Attack, Defend]\n---',
-    );
+    const r = parseMessageContent('Choose:\n\n---\n\n[Attack, Defend]\n---');
     expect(r.actions).toEqual(['Attack', 'Defend']);
     expect(r.notification).toBeNull();
   });

@@ -13,6 +13,7 @@ export { default as NavItem } from './NavItem.svelte';
 export { default as Select } from './Select.svelte';
 export { default as Tabs } from './Tabs.svelte';
 export { default as Textarea } from './Textarea.svelte';
+export { default as ThreadGroup } from './ThreadGroup.svelte';
 export { default as ThreadItem } from './ThreadItem.svelte';
 export { default as Toggle } from './Toggle.svelte';
 export { default as Tooltip } from './Tooltip.svelte';

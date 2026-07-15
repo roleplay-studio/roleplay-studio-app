@@ -4,7 +4,8 @@
   import { api } from './api';
   import { t } from './i18n';
   import { formatRelativeTime } from './time';
-  import { ThreadItem } from './ui';
+  import { Select, ThreadItem } from './ui';
+  import { sortThreads, THREAD_SORT_MODE_KEYS, type ThreadSortMode } from './utils/threadSort';
 
   const {
     lang = 'en',
@@ -33,6 +34,16 @@
   let contextY = $state(0);
   let showContextMenu = $state(false);
   let menuEl = $state<HTMLElement | null>(null);
+
+  // ── Sort state — user-selectable mode. Default 'by-last-activity'
+  // matches the backend's default ordering, so flipping through sorts
+  // is reversible without the user losing their place. ──
+  let sortMode = $state<ThreadSortMode>('by-last-activity');
+
+  // Sorted view of the parent's ``threads`` — pure helper, no in-place
+  // mutation of the input array so the parent's reactive update path
+  // doesn't get confused.
+  const sortedThreads = $derived(sortThreads(threads, sortMode));
 
   $effect(() => {
     if (!showContextMenu || !menuEl) return;
@@ -271,10 +282,29 @@
     </div>
   </div>
 
+  <!-- Sort dropdown. Picks the user-selectable order over the
+       threads array. Driven by the THREAD_SORT_MODE_KEYS map so
+       adding a new mode = adding one i18n string per language, no
+       UI change here. -->
+  {#if threads.length > 1}
+    <div class="td-sort">
+      <span class="td-sort-label">{t('thread_sort.label', lang)}</span>
+      <Select
+        bind:value={sortMode}
+        options={[
+          { label: t(THREAD_SORT_MODE_KEYS['by-last-activity'], lang), value: 'by-last-activity' },
+          { label: t(THREAD_SORT_MODE_KEYS['by-message-count'], lang), value: 'by-message-count' },
+          { label: t(THREAD_SORT_MODE_KEYS['by-name'], lang), value: 'by-name' },
+        ]}
+      />
+    </div>
+  {/if}
+
   <div class="td-list">
-    {#each threads as thread (thread.id)}
+    {#each sortedThreads as thread (thread.id)}
       <ThreadItem
         {thread}
+        lang={lang}
         timeLabel={formatRelativeTime(thread.created_at, lang)}
         selected={selectedThreadId === thread.id}
         renaming={renamingThreadId === thread.id}
@@ -469,6 +499,26 @@
     padding: 14px 16px;
     border-bottom: 1px solid var(--td-border);
     flex-shrink: 0;
+  }
+  /* Sort bar — sits between header and list. Compact because the
+     drawer is only 280px wide; the Select component handles its own
+     chevron styling. */
+  .td-sort {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--td-border);
+    flex-shrink: 0;
+  }
+  .td-sort-label {
+    font-family: 'Maple Mono', sans-serif;
+    font-size: 11px;
+    color: var(--td-text-tertiary, #86868b);
+    letter-spacing: 0.2px;
+  }
+  .td-sort :global(.ray-select-container) {
+    flex: 1;
   }
   .td-title {
     font-family: 'Maple Mono', sans-serif;

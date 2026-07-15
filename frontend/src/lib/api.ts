@@ -274,8 +274,13 @@ export interface RecentThread {
   bot_personality: string;
   last_message_at: null | string;
   last_message_preview: string;
+  /** Most recent active assistant message's `short_content`. Preferred over `last_message_preview`. */
+  last_message_short_content: null | string;
+  /** Total active-chain messages in this thread. */
+  message_count: number;
   persona_avatar_path: null | string;
   persona_name: null | string;
+  /** Summary of the conversation, populated when short_content is empty. */
   summary: null | string;
   thread_id: number;
 }
@@ -317,9 +322,19 @@ export interface Thread {
   bot_id: number;
   created_at: null | string;
   id: number;
+  /** Timestamp of the most recent active message in the thread. */
+  last_message_at: null | string;
+  /** short_content of the most recent active assistant message. */
+  last_message_preview: null | string;
+  /** Role of the most recent active message: 'user' | 'assistant' | 'system'. */
+  last_message_role: null | string;
+  /** Total active-chain messages (user + assistant turns still in the chain). */
+  message_count: number;
   name: string;
   /** FK to the source thread (forks only). Null for root threads. */
-  parent_thread_id?: number | null;
+  parent_thread_id?: null | number;
+  /** Avatar of the linked persona, if any. */
+  persona_avatar_path: null | string;
   persona_id: null | number;
   persona_name: null | string;
   summary: null | string;

@@ -407,6 +407,100 @@ class SqlAlchemyThreadRepository:
                 for row in rows
             ]
 
+    async def list_for_bot_with_preview(self, bot_id: int) -> list[ThreadDTO]:
+        """Per-bot thread listing enriched with preview fields.
+
+        Implementation: ONE query, using correlated scalar subqueries
+        to fetch the newest active-chain message stats per thread.
+        We use correlated subqueries (NOT ``LATERAL``) because SQLite
+        — the project's primary backend for this pet-project — does
+        not implement ``LATERAL``. PostgreSQL and MySQL also accept
+        this form, so the query stays portable.
+
+        Sort order: most-recently-active first (last_message_at DESC,
+        falling back to created_at DESC) — matches the cross-bot
+        ``list_recent`` ordering so the two views feel consistent.
+
+        ``message_count`` includes ALL active-chain messages (matches
+        the filter used by ``list_for_thread``: branch_group IS NULL OR
+        is_active), regardless of generation_status. This intentionally
+        differs from ``ThreadStatsDTO.message_count`` which counts only
+        the ``generation_status='complete'`` subset — the thread list
+        wants to show "how active is this conversation", not "how
+        many finished exchanges".
+        """
+        async with self._store._async_session_factory() as session:
+            rows_result = await session.execute(
+                text("""
+                    SELECT
+                        t.id,
+                        t.bot_id,
+                        t.name,
+                        t.summary,
+                        t.persona_id,
+                        p.name AS persona_name,
+                        p.avatar_path AS persona_avatar_path,
+                        t.created_at,
+                        t.parent_thread_id,
+                        (SELECT COUNT(*)
+                           FROM conversations c
+                          WHERE c.thread_id = t.id
+                            AND (c.branch_group IS NULL OR c.is_active)
+                        ) AS message_count,
+                        (SELECT MAX(c.timestamp)
+                           FROM conversations c
+                          WHERE c.thread_id = t.id
+                            AND (c.branch_group IS NULL OR c.is_active)
+                        ) AS last_message_at,
+                        (SELECT c2.short_content
+                           FROM conversations c2
+                          WHERE c2.thread_id = t.id
+                            AND c2.role = 'assistant'
+                            AND (c2.branch_group IS NULL OR c2.is_active)
+                          ORDER BY c2.id DESC
+                          LIMIT 1) AS last_message_preview,
+                        (SELECT c3.role
+                           FROM conversations c3
+                          WHERE c3.thread_id = t.id
+                            AND (c3.branch_group IS NULL OR c3.is_active)
+                          ORDER BY c3.id DESC
+                          LIMIT 1) AS last_message_role
+                    FROM chat_threads t
+                    LEFT JOIN user_personas p ON t.persona_id = p.id
+                    WHERE t.bot_id = :bot_id
+                    ORDER BY COALESCE(
+                        (SELECT MAX(c.timestamp)
+                           FROM conversations c
+                          WHERE c.thread_id = t.id
+                            AND (c.branch_group IS NULL OR c.is_active)
+                        ),
+                        t.created_at
+                    ) DESC, t.id DESC
+                """),
+                {"bot_id": bot_id},
+            )
+            rows = rows_result.fetchall()
+            return [
+                ThreadDTO(
+                    id=row.id,
+                    bot_id=row.bot_id,
+                    created_at=row.created_at,
+                    last_message_at=row.last_message_at,
+                    last_message_preview=row.last_message_preview,
+                    last_message_role=row.last_message_role,
+                    message_count=int(row.message_count or 0),
+                    name=row.name,
+                    parent_thread_id=row.parent_thread_id,
+                    persona_avatar_path=row.persona_avatar_path,
+                    persona_id=row.persona_id,
+                    persona_name=row.persona_name,
+                    summary=row.summary,
+                )
+                for row in rows
+            ]
+
+
+
     async def rename(self, thread_id: int, name: str) -> None:
         async with self._store._async_session_factory() as session:
             result = await session.execute(select(ChatThread).where(ChatThread.id == thread_id))
@@ -542,6 +636,132 @@ class SqlAlchemyThreadRepository:
                         persona_name=row.persona_name,
                         persona_avatar_path=row.persona_avatar_path,
                         last_message_preview=(row.last_message_preview or "")[:150],
+                        last_message_at=row.last_message_at,
+                    )
+                )
+            return result
+
+    async def list_recent_with_previews(
+        self,
+        limit: int = 30,
+        bot_id: int | None = None,
+        before_thread_id: int | None = None,
+    ) -> list[RecentThreadDTO]:
+        """Cross-bot thread listing enriched with preview fields + count.
+
+        Two SQL adjustments vs the legacy ``list_recent``:
+
+        1. Correlated scalar subqueries add ``COUNT(*)`` and
+           ``MAX(timestamp)`` for active-chain messages, plus the most
+           recent active assistant message's ``short_content`` (we
+           rename it to ``last_message_short_content`` to avoid
+           confusion with ``last_message_preview`` which truncates
+           ``content`` to 150 chars).
+        2. Keyset pagination via ``before_thread_id``: when the frontend
+           infinite-scroll sentinel asks for the next page, it passes
+           the smallest thread_id in the current page; this query then
+           only returns threads older than that id (smaller id = older
+           thread in the cross-bot recent view, since sort is
+           newest-first by last_message_at).
+
+        We use correlated scalar subqueries rather than ``LATERAL``
+        because SQLite (this project's primary store) does not
+        implement ``LATERAL``. See ``list_for_bot_with_preview`` for
+        the same trade-off rationale.
+
+        Sort order remains ``last_message_at DESC, t.id DESC`` — same
+        as ``list_recent`` so callers see consistent ordering across
+        both endpoints during the migration window.
+        """
+        async with self._store._async_session_factory() as session:
+            bot_filter = "AND t.bot_id = :bid" if bot_id is not None else ""
+            params: dict[str, object] = {"lim": limit}
+            if bot_id is not None:
+                params["bid"] = bot_id
+            if before_thread_id is not None:
+                params["before_id"] = before_thread_id
+
+            before_filter = ""
+            if before_thread_id is not None:
+                before_filter = "AND t.id < :before_id"
+
+            rows_result = await session.execute(
+                text(f"""
+                    SELECT
+                        t.id AS thread_id,
+                        t.bot_id,
+                        t.summary,
+                        b.name AS bot_name,
+                        b.avatar_path AS bot_avatar_path,
+                        b.categories AS bot_categories,
+                        b.personality AS bot_personality,
+                        p.name AS persona_name,
+                        p.avatar_path AS persona_avatar_path,
+                        COALESCE(last.content, '') AS last_message_preview,
+                        -- ``last_message_short_content`` stays NULL when
+                        -- no messages exist (so the DTO default ``None``
+                        -- propagates to the frontend). Using COALESCE
+                        -- here would flatten to '' which leaks into
+                        -- Python as a non-null empty string and confuses
+                        -- the empty-string-vs-None check.
+                        last.short_content AS last_message_short_content,
+                        (SELECT COUNT(*)
+                           FROM conversations c
+                          WHERE c.thread_id = t.id
+                            AND (c.branch_group IS NULL OR c.is_active)
+                        ) AS message_count,
+                        COALESCE(last.last_at, t.created_at) AS last_message_at
+                    FROM chat_threads t
+                    JOIN bots b ON t.bot_id = b.id
+                    LEFT JOIN user_personas p ON t.persona_id = p.id
+                    LEFT JOIN (
+                        SELECT c1.thread_id, c1.content, c1.short_content, c1.timestamp AS last_at
+                        FROM conversations c1
+                        INNER JOIN (
+                            SELECT thread_id, MAX(id) AS max_id
+                            FROM conversations
+                            GROUP BY thread_id
+                        ) c2 ON c1.id = c2.max_id
+                    ) last ON last.thread_id = t.id
+                    WHERE 1=1 {bot_filter} {before_filter}
+                    ORDER BY last_message_at DESC, t.id DESC
+                    LIMIT :lim
+                """),
+                params,
+            )
+            rows = rows_result.fetchall()
+
+            result = []
+            for row in rows:
+                cats: list[str] = []
+                try:
+                    parsed = json.loads(row.bot_categories or "[]")
+                    cats = parsed if isinstance(parsed, list) else []
+                except (json.JSONDecodeError, TypeError):
+                    pass
+
+                # ``last_message_short_content`` is preferred over the
+                # truncated ``last_message_preview`` when present —
+                # short_content is structured for the list-row slot.
+                short = row.last_message_short_content or ""
+                # Only fall back to preview when short_content is empty:
+                # preview is the truncated raw content which can leak
+                # markdown / placeholder noise.
+                preview_text: str = short if short else (row.last_message_preview or "")[:150]
+                result.append(
+                    RecentThreadDTO(
+                        thread_id=row.thread_id,
+                        bot_id=row.bot_id,
+                        summary=row.summary,
+                        bot_name=row.bot_name,
+                        bot_avatar_path=row.bot_avatar_path,
+                        bot_categories=cats,
+                        bot_personality=row.bot_personality or "",
+                        persona_name=row.persona_name,
+                        persona_avatar_path=row.persona_avatar_path,
+                        last_message_preview=preview_text,
+                        last_message_short_content=row.last_message_short_content,
+                        message_count=int(row.message_count or 0),
                         last_message_at=row.last_message_at,
                     )
                 )

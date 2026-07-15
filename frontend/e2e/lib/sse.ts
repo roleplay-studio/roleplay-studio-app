@@ -20,10 +20,36 @@ import type { APIRequestContext, APIResponse } from '@playwright/test';
 
 export type StreamChunk = {
   /** Raw JSON payload (when `data` was parseable). Null for the `[DONE]` sentinel. */
-  data: unknown | null;
+  data: null | unknown;
   /** True when the backend signals end of stream (`data: [DONE]`). */
   done: boolean;
 };
+
+/**
+ * Collect streamed chunks until either:
+ *  - the total content text reaches `minChars`, or
+ *  - the stream ends (whichever first).
+ *
+ * Returns the concatenated string. Useful for fast smoke tests: we
+ * don't need the entire response, just enough to prove the assistant
+ * spoke.
+ */
+export async function collectUntil(
+  api: APIRequestContext,
+  path: string,
+  opts: { minChars: number; payload?: unknown },
+): Promise<string> {
+  let total = '';
+  for await (const chunk of openStream(api, path, { data: opts.payload })) {
+    if (chunk.done) break;
+    const d = chunk.data as null | { content?: string };
+    if (d?.content) {
+      total += d.content;
+      if (total.length >= opts.minChars) break;
+    }
+  }
+  return total;
+}
 
 /**
  * Open a streaming endpoint and yield chunks as they arrive.
@@ -44,15 +70,19 @@ export type StreamChunk = {
  *
  * Throws if ``response.ok()`` is false.
  */
-export async function* openStream(api: APIRequestContext, path: string, opts: { method?: string; data?: unknown; headers?: Record<string, string> } = {}): AsyncGenerator<StreamChunk> {
+export async function* openStream(
+  api: APIRequestContext,
+  path: string,
+  opts: { data?: unknown; headers?: Record<string, string>; method?: string } = {},
+): AsyncGenerator<StreamChunk> {
   const response: APIResponse = await api.fetch(path, {
-    method: opts.method ?? 'POST',
     data: opts.data,
     headers: {
-      'Content-Type': 'application/json',
       Accept: 'text/event-stream',
+      'Content-Type': 'application/json',
       ...opts.headers,
     },
+    method: opts.method ?? 'POST',
   });
   if (!response.ok()) {
     const body = await response.text();
@@ -82,26 +112,4 @@ export async function* openStream(api: APIRequestContext, path: string, opts: { 
     // assert on it instead of silently truncating.
     yield { data: null, done: true };
   }
-}
-
-/**
- * Collect streamed chunks until either:
- *  - the total content text reaches `minChars`, or
- *  - the stream ends (whichever first).
- *
- * Returns the concatenated string. Useful for fast smoke tests: we
- * don't need the entire response, just enough to prove the assistant
- * spoke.
- */
-export async function collectUntil(api: APIRequestContext, path: string, opts: { minChars: number; payload?: unknown }): Promise<string> {
-  let total = '';
-  for await (const chunk of openStream(api, path, { data: opts.payload })) {
-    if (chunk.done) break;
-    const d = chunk.data as { content?: string } | null;
-    if (d?.content) {
-      total += d.content;
-      if (total.length >= opts.minChars) break;
-    }
-  }
-  return total;
 }

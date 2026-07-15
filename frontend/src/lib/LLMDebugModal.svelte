@@ -115,9 +115,9 @@
           <pre class="dbm-pre">{assistantState}</pre>
         {:else}
           <div class="dbm-state-empty">
-            No world-state snapshot for this message. The bot either has
-            no <code>world_state_prompt</code> configured, or the
-            background state-update task hasn't completed yet.
+            No world-state snapshot for this message. The bot either has no <code
+              >world_state_prompt</code
+            > configured, or the background state-update task hasn't completed yet.
           </div>
         {/if}
       </section>

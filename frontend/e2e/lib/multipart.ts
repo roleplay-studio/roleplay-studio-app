@@ -16,17 +16,13 @@ type NodeBuffer = Uint8Array & {
   toString(encoding?: string): string;
 };
 
-declare const Buffer: { from(input: string, encoding?: string): NodeBuffer } | undefined;
-
-function getBuffer(): { from(input: string, encoding?: string): NodeBuffer } {
-  const g = globalThis as unknown as { Buffer?: { from(input: string, encoding?: string): NodeBuffer } };
-  if (!g.Buffer) {
-    throw new Error(
-      'Node Buffer is not available in this Playwright runtime — multipart uploads require Node.',
-    );
-  }
-  return g.Buffer;
-}
+// Ambient declaration for Node's Buffer global so the type checker
+// narrows `globalThis.Buffer` correctly. The name is prefixed with
+// `_` so the eslint `no-unused-vars` rule treats it as a known
+// ambient (it is consumed via `globalThis.Buffer` on line 36, not
+// as a direct symbol reference). Without this, the page-object
+// tsconfig breaks for `multipart.buffer: NodeBuffer`.
+declare const _Buffer: undefined | { from(input: string, encoding?: string): NodeBuffer };
 
 export async function postMultipartText(
   api: APIRequestContext,
@@ -39,7 +35,19 @@ export async function postMultipartText(
   const buf = getBuffer().from(text, 'utf-8');
   return api.post(path, {
     multipart: {
-      [fieldName]: { name: fileName, mimeType, buffer: buf },
+      [fieldName]: { buffer: buf, mimeType, name: fileName },
     },
   });
+}
+
+function getBuffer(): { from(input: string, encoding?: string): NodeBuffer } {
+  const g = globalThis as unknown as {
+    Buffer?: { from(input: string, encoding?: string): NodeBuffer };
+  };
+  if (!g.Buffer) {
+    throw new Error(
+      'Node Buffer is not available in this Playwright runtime — multipart uploads require Node.',
+    );
+  }
+  return g.Buffer;
 }

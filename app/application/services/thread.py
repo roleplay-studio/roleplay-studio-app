@@ -96,12 +96,34 @@ class ThreadService:
         return thread
 
     async def list_threads(self, bot_id: int) -> list[ThreadDTO]:
-        return await self._threads.list_for_bot(bot_id)
+        """List threads for a bot — enriched with preview fields.
+
+        Delegates to the repository's ``list_for_bot_with_preview`` so
+        the chat thread-list UI gets the message_count + last-message
+        metadata in one round-trip instead of firing N+1
+        ``GET /api/threads/{id}/stats`` calls. See ThreadDTO field
+        docs for the contract.
+        """
+        return await self._threads.list_for_bot_with_preview(bot_id)
 
     async def list_recent_threads(
-        self, limit: int = 20, bot_id: int | None = None
+        self,
+        limit: int = 20,
+        bot_id: int | None = None,
+        before_thread_id: int | None = None,
     ) -> list[RecentThreadDTO]:
-        return await self._threads.list_recent(limit, bot_id=bot_id)
+        """Cross-bot recent listing, enriched with preview fields + count.
+
+        ``before_thread_id`` enables keyset pagination — pass the id of
+        the last thread in the previous page and you'll get the next
+        page older than it. See :meth:`ThreadRepository.list_recent_with_previews`
+        for the SQL semantics.
+        """
+        return await self._threads.list_recent_with_previews(
+            limit=limit,
+            bot_id=bot_id,
+            before_thread_id=before_thread_id,
+        )
 
     async def rename_thread(self, thread_id: int, name: str) -> None:
         await self._threads.rename(thread_id, name.strip())

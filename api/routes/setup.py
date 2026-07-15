@@ -11,11 +11,11 @@ from pydantic import BaseModel
 
 from api.bot_loader import load_from_json, load_from_png
 from api.bots_registry import list_starter_bots
-from api.constants import PROVIDERS
 from api.deps import ContainerDep
 from api.schemas import ConfigureRequest
 from app.bootstrap import reset_container
 from app.infrastructure.config import Settings
+from app.infrastructure.llm.providers.catalog import catalogs_as_wizard_list
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +24,60 @@ router = APIRouter()
 
 @router.get("/providers")
 async def list_providers():
-    """Return available LLM providers."""
-    return [{"id": pid, **info} for pid, info in PROVIDERS.items()]
+    """Return available LLM providers + the one currently selected.
+
+    Response shape::
+
+        {
+            "providers": [<catalog dictionaries …>],
+            "selected_provider": "deepseek",          # the id from
+                                                       # Settings.llm_provider
+                                                       # — i.e. what's
+                                                       # actually in
+                                                       # .env right now
+        }
+
+    Phase-1.5a: previously this endpoint returned a bare list and
+    the SetupWizard initialised its dropdown with
+    ``wizardState.providers[0].id`` — the first provider in
+    alphabetical order, which on the old dict-based registry was
+    ``custom`` and on the new catalog-based ordering is
+    ``custom`` too. The wizard ignored whatever the operator had
+    saved to ``.env`` last session. This change ships the
+    currently-selected id alongside the catalog so the wizard can
+    restore it on reload instead of clobbering the user's choice
+    with whatever happens to sort first.
+    """
+    settings = Settings.from_env()
+    return {
+        "providers": catalogs_as_wizard_list(),
+        "selected_provider": settings.llm_provider,
+    }
+
+
+def _defaults_for_provider(provider_id: str) -> dict[str, object]:
+    """Return the catalog-derived defaults for ``provider_id`` as a flat dict.
+
+    Used by :func:`setup_configure` to look up the canonical
+    ``default_base_url`` (when the operator hasn't typed one in),
+    ``needs_key`` (to decide whether to clear ``LLM_API_KEY``), and
+    future catalog fields without each call site having to
+    import the catalog machinery.
+
+    Returns ``{}`` on miss (unknown id) — the route's existing
+    ``ConfigurationError`` / 4xx handling kicks in upstream.
+    """
+    from app.infrastructure.llm.providers.catalog import find_catalog
+
+    cat = find_catalog(provider_id)
+    if cat is None:
+        return {}
+    return {
+        "default_base_url": cat.default_base_url,
+        "default_model": cat.default_model,
+        "needs_key": cat.needs_key,
+        "manual_setup": cat.manual_setup,
+    }
 
 
 @router.get("/status")
@@ -55,9 +107,14 @@ async def setup_configure(body: ConfigureRequest, container: ContainerDep):
     env_path = data_dir / ".env"
     env_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Determine values
+    # Determine values — defaults come from the per-provider catalog
+    # (Phase 1.5 migration). ``api.constants.PROVIDERS`` is kept as
+    # a fallback for backwards compatibility and tests that still
+    # import it; the bootstrap factory and the SetupWizard route
+    # both read catalogs directly.
     provider = body.provider
-    base_url = body.base_url or PROVIDERS.get(provider, {}).get("default_base_url", "")
+    catalog_defaults = _defaults_for_provider(provider)
+    base_url = body.base_url or catalog_defaults.get("default_base_url", "")
     api_key = body.api_key or ""
     model = body.chat_model or ""
 
@@ -81,7 +138,7 @@ async def setup_configure(body: ConfigureRequest, container: ContainerDep):
         if v:
             os.environ[k] = v
     # If no key and provider doesn't need one, ensure key is cleared
-    if not PROVIDERS.get(provider, {}).get("needs_key", True):
+    if not catalog_defaults.get("needs_key", True):
         os.environ.pop("LLM_API_KEY", None)
 
     # Bot creation happens through POST /import-bots (selected by the user

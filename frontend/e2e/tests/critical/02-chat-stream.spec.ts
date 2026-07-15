@@ -29,13 +29,12 @@
  * before done). The only way to be sure is to talk to the real
  * endpoint and inspect chunks in order.
  */
-import { test, expect } from '@playwright/test';
+import { expect } from '@playwright/test';
+
 import { test as backendTest } from '../../fixtures/backend';
 import { collectUntil, openStream } from '../../lib/sse';
 
-backendTest('SSE envelope: meta first, then chunk/error, then done @smoke', async ({
-  backend,
-}) => {
+backendTest('SSE envelope: meta first, then chunk/error, then done @smoke', async ({ backend }) => {
   await backend.waitReady();
 
   // Pick the first existing bot — we don't seed a fresh one because
@@ -50,7 +49,7 @@ backendTest('SSE envelope: meta first, then chunk/error, then done @smoke', asyn
   expect(t.ok()).toBeTruthy();
   const threadId = (await t.json()).id;
 
-  const events: Array<{ type: string; payload: unknown }> = [];
+  const events: Array<{ payload: unknown; type: string }> = [];
   let sawDone = false;
   let sawMeta = false;
   let sawProgress = false;
@@ -60,22 +59,18 @@ backendTest('SSE envelope: meta first, then chunk/error, then done @smoke', asyn
   })) {
     if (chunk.done) {
       sawDone = true;
-      events.push({ type: 'done', payload: null });
+      events.push({ payload: null, type: 'done' });
       break;
     }
-    const payload = chunk.data as { type: string } | null;
+    const payload = chunk.data as null | { type: string };
     expect(payload?.type, 'every SSE chunk is missing a `type` field').toBeTruthy();
-    events.push({ type: payload!.type, payload });
+    events.push({ payload, type: payload!.type });
 
     if (payload!.type === 'meta') sawMeta = true;
     // Either the LLM streamed chunks of reasoning/content, or
     // it errored out (auth fail, network glitch). Both are
     // legitimate progress signals for the UI.
-    if (
-      payload!.type === 'chunk' ||
-      payload!.type === 'reasoning' ||
-      payload!.type === 'error'
-    ) {
+    if (payload!.type === 'chunk' || payload!.type === 'reasoning' || payload!.type === 'error') {
       sawProgress = true;
     }
   }
@@ -94,31 +89,32 @@ backendTest('SSE envelope: meta first, then chunk/error, then done @smoke', asyn
   await backend.api.delete(`/api/threads/${threadId}`);
 });
 
-backendTest('SSE body is parseable line by line (no chunked-stream corruption) @smoke', async ({
-  backend,
-}) => {
-  await backend.waitReady();
-  const list = await backend.api.get('/api/bots');
-  const bots = (await list.json()) as Array<{ id: number }>;
-  const botId = bots[0].id;
-  const t = await backend.api.post(`/api/bots/${botId}/threads`, { data: {} });
-  const threadId = (await t.json()).id;
+backendTest(
+  'SSE body is parseable line by line (no chunked-stream corruption) @smoke',
+  async ({ backend }) => {
+    await backend.waitReady();
+    const list = await backend.api.get('/api/bots');
+    const bots = (await list.json()) as Array<{ id: number }>;
+    const botId = bots[0].id;
+    const t = await backend.api.post(`/api/bots/${botId}/threads`, { data: {} });
+    const threadId = (await t.json()).id;
 
-  // collectUntil returns the concatenated assistant text (from
-  // ``chunk`` events with ``content``), or '' if the LLM was
-  // unavailable / errored. Either is acceptable — what we want
-  // to know is that ``openStream`` parsed the bytes without
-  // throwing. The real LLM is best-effort: this test asserts
-  // the protocol stability, not the model quality.
-  const text = await collectUntil(backend.api, `/api/threads/${threadId}/messages`, {
-    minChars: 1,
-    payload: {
-      bot_id: botId,
-      user_input: 'say one word',
-      user_message_id: `e2e-stream-collect-${Date.now()}`,
-    },
-  });
-  expect(typeof text).toBe('string');
+    // collectUntil returns the concatenated assistant text (from
+    // ``chunk`` events with ``content``), or '' if the LLM was
+    // unavailable / errored. Either is acceptable — what we want
+    // to know is that ``openStream`` parsed the bytes without
+    // throwing. The real LLM is best-effort: this test asserts
+    // the protocol stability, not the model quality.
+    const text = await collectUntil(backend.api, `/api/threads/${threadId}/messages`, {
+      minChars: 1,
+      payload: {
+        bot_id: botId,
+        user_input: 'say one word',
+        user_message_id: `e2e-stream-collect-${Date.now()}`,
+      },
+    });
+    expect(typeof text).toBe('string');
 
-  await backend.api.delete(`/api/threads/${threadId}`);
-});
+    await backend.api.delete(`/api/threads/${threadId}`);
+  },
+);

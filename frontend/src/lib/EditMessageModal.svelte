@@ -17,8 +17,8 @@
   // branching fidelity on state.
   let {
     content = '',
-    messageState = null,
     lang = 'en',
+    messageState = null,
     onclose,
     onsave,
     show = false,
@@ -27,7 +27,7 @@
     lang?: string;
     messageState?: null | string;
     onclose?: () => void;
-    onsave?: (text: string, state: string | null) => void;
+    onsave?: (text: string, state: null | string) => void;
     show?: boolean;
   } = $props();
 
@@ -92,11 +92,7 @@
       >
     </div>
   {/snippet}
-  <Tabs
-    activeTab={activeTab}
-    onchange={(id) => (activeTab = id as 'message' | 'state')}
-    tabs={tabs}
-  />
+  <Tabs {activeTab} onchange={(id) => (activeTab = id as 'message' | 'state')} {tabs} />
   <div class="mt-4">
     {#if activeTab === 'message'}
       <Input

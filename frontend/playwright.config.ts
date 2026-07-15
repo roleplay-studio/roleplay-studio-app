@@ -16,36 +16,12 @@
  */
 import { defineConfig, devices } from '@playwright/test';
 
-const PORT = 55245;
 const FRONTEND_PORT = 5173;
 
 export default defineConfig({
-  testDir: './e2e/tests',
-  fullyParallel: true,
-  forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 1 : 0,
-  workers: process.env.CI ? 1 : undefined,
-  reporter: process.env.CI
-    ? [['html', { open: 'never' }], ['list']]
-    : [['list'], ['html', { open: 'never' }]],
-
-  // 30 s budget — Deepseek average first-token is <2 s but cold start
-  // and Chroma indexing push beyond typical 5 s.
-  timeout: 30_000,
   expect: { timeout: 5_000 },
-
-  use: {
-    baseURL: `http://127.0.0.1:${FRONTEND_PORT}`,
-    trace: 'retain-on-failure',
-    screenshot: 'only-on-failure',
-    video: 'retain-on-failure',
-    // actionTimeout: 8_000,  // enabled if flake shows up
-
-    // Fail fast on console errors so we don't ship silent JS breakage.
-    // ApplicationError events are logged through a custom transport,
-    // so console.error is the canonical signal we can listen for.
-  },
-
+  forbidOnly: !!process.env.CI,
+  fullyParallel: true,
   projects: [
     {
       name: 'critical-chromium',
@@ -55,12 +31,12 @@ export default defineConfig({
     {
       name: 'desktop-chromium',
       testMatch: /pages\/.*\.desktop\.spec\.ts/,
-      use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } },
+      use: { ...devices['Desktop Chrome'], viewport: { height: 900, width: 1440 } },
     },
     {
       name: 'laptop-chromium',
       testMatch: /pages\/.*\.laptop\.spec\.ts/,
-      use: { ...devices['Desktop Chrome'], viewport: { width: 1024, height: 768 } },
+      use: { ...devices['Desktop Chrome'], viewport: { height: 768, width: 1024 } },
     },
     {
       name: 'mobile-chromium',
@@ -78,6 +54,27 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
+  reporter: process.env.CI
+    ? [['html', { open: 'never' }], ['list']]
+    : [['list'], ['html', { open: 'never' }]],
+  retries: process.env.CI ? 1 : 0,
+
+  testDir: './e2e/tests',
+  // 30 s budget — Deepseek average first-token is <2 s but cold start
+  // and Chroma indexing push beyond typical 5 s.
+  timeout: 30_000,
+
+  use: {
+    baseURL: `http://127.0.0.1:${FRONTEND_PORT}`,
+    screenshot: 'only-on-failure',
+    trace: 'retain-on-failure',
+    video: 'retain-on-failure',
+    // actionTimeout: 8_000,  // enabled if flake shows up
+
+    // Fail fast on console errors so we don't ship silent JS breakage.
+    // ApplicationError events are logged through a custom transport,
+    // so console.error is the canonical signal we can listen for.
+  },
 
   // The backend (FastAPI on 55245) is started by hand before the suite
   // runs (`make e2e-backend`). Playwright's `webServer` only manages the
@@ -86,11 +83,13 @@ export default defineConfig({
   webServer: [
     {
       command: `npm run dev -- --host 127.0.0.1 --port ${FRONTEND_PORT} --strictPort`,
-      url: `http://127.0.0.1:${FRONTEND_PORT}`,
       reuseExistingServer: !process.env.CI,
-      timeout: 60_000,
-      stdout: 'ignore',
       stderr: 'pipe',
+      stdout: 'ignore',
+      timeout: 60_000,
+      url: `http://127.0.0.1:${FRONTEND_PORT}`,
     },
   ],
+
+  workers: process.env.CI ? 1 : undefined,
 });
