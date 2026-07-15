@@ -15,9 +15,9 @@ class BotType(StrEnum):
     @property
     def label(self) -> str:
         labels = {
-            BotType.RP: "🎭 RolePlay",
-            BotType.ASSISTANT: "🤖 Assistant",
-            BotType.AGENT: "🛠️ Agent",
+            BotType.RP: "RolePlay",
+            BotType.ASSISTANT: "Assistant",
+            BotType.AGENT: "Agent",
         }
         return labels[self]
 
