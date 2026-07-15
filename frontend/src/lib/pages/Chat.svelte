@@ -31,6 +31,8 @@
   import { attachInfiniteScroll } from '../utils/infiniteScrollSentinel';
   import { dismissNotification, isNotificationDismissed } from '../utils/notificationStore';
   import { parseMessageContent } from '../utils/parseMetadata';
+  import { ttsApi, TTSDisabledError } from '../api';
+  import { getAutoplayTts } from '../chatSettings';
   import { captureScrollAnchor, restoreScrollAnchor } from '../utils/scrollAnchor';
 
   // Dev-mode gate for the LLM debug modal. Vite's import.meta.env.DEV
@@ -85,6 +87,16 @@
   // to /abort as the server-side kill signal.
   let streamAbort: AbortController | null = null;
   let streamError = $state(false);
+  // Current <audio> for the autoplay-TTS feature. Not $state — we
+  // don't want the chat to re-render every time playback state ticks;
+  // the per-message TTSButton has its own audio element so it can
+  // keep working even if autoplay is mid-flight. ``null`` when idle.
+  let autoplayAudio: HTMLAudioElement | null = null;
+  // The message id we're autoplaying. We only autoplay the freshly
+  // persisted assistant message from the stream that just ended; on
+  // thread switch / new send we drop the old id so a stale "still
+  // listening to the previous reply" doesn't trigger twice.
+  let autoplayTargetId: null | number = null;
   let messagesEnd: HTMLDivElement | undefined = $state();
   // Scrollable messages container — used to detect when the user has
   // scrolled up so the "jump to bottom" button can appear.
@@ -244,6 +256,10 @@
       bot = null;
       threads = [];
       messages = [];
+      // Drop any in-flight autoplay from the previous bot — the
+      // chat-window settings popover is the only piece of UI the
+      // user expects to survive a bot switch.
+      stopAutoplay();
       selectedThreadId = null;
       editMessageId = null;
       editContent = '';
@@ -263,6 +279,7 @@
       bot = null;
       threads = [];
       messages = [];
+      stopAutoplay();
       selectedThreadId = null;
       threadStats = null;
       loading = false;
@@ -288,6 +305,7 @@
 
   onDestroy(() => {
     unsubLang?.();
+    stopAutoplay();
   });
 
   // ── Data loading ──
@@ -535,6 +553,89 @@
     // UI work is needed here.
   }
 
+  function stopAutoplay() {
+    if (autoplayAudio) {
+      autoplayAudio.pause();
+      autoplayAudio = null;
+    }
+    autoplayTargetId = null;
+  }
+
+  /**
+   * Auto-play the most recent assistant message via TTS. Called from
+   * the two stream-finished sites (send + regenerate). Honours the
+   * ``autoplayTts`` user preference and silently bails out on every
+   * known failure mode (TTS disabled server-side, network error,
+   * autoplay-blocked by the browser) — autoplay is a convenience,
+   * not a contract.
+   *
+   * Stripping markdown / metadata via parseMessageContent keeps the
+   * speech clean — same approach TTSButton uses for its inline play.
+   */
+  async function autoPlayLastAssistant() {
+    if (!getAutoplayTts()) return;
+    if (!messages.length) return;
+    const last = messages[messages.length - 1];
+    if (last.role !== 'assistant' || last.id == null) return;
+    // Already playing this exact message? No-op. (regen can call us
+    // twice if both branches trigger.)
+    if (autoplayTargetId === last.id && autoplayAudio) return;
+    // Only autoplay when there's actual text to speak. Don't shout
+    // greeting placeholders, world-state blocks, or error messages.
+    const parsed = parseMessageContent(last.content);
+    const text = parsed.mainContent.trim();
+    if (!text) return;
+    stopAutoplay();
+    autoplayTargetId = last.id;
+    let cacheId: string;
+    try {
+      const resp = await ttsApi.synthesize({ text });
+      cacheId = resp.cache_id;
+    } catch (err) {
+      if (err instanceof TTSDisabledError) {
+        // Server told us TTS is off — clear the autoplay target so
+        // we don't keep trying on every subsequent message. The
+        // per-message TTSButton also hides itself via sessionStorage
+        // (see TTSButton.svelte).
+        autoplayTargetId = null;
+        return;
+      }
+      console.warn('Autoplay TTS: synthesize failed', err);
+      autoplayTargetId = null;
+      return;
+    }
+    const audio = new Audio(ttsApi.audioUrl(cacheId));
+    autoplayAudio = audio;
+    audio.onended = () => {
+      // Only null out if we're still on this audio element — a new
+      // autoplay might have replaced it in the meantime.
+      if (autoplayAudio === audio) {
+        autoplayAudio = null;
+        autoplayTargetId = null;
+      }
+    };
+    audio.onerror = () => {
+      if (autoplayAudio === audio) {
+        autoplayAudio = null;
+        autoplayTargetId = null;
+      }
+    };
+    try {
+      await audio.play();
+    } catch (err) {
+      // Browsers reject .play() outside a user gesture the first
+      // time; the most likely cause here is the user toggled autoplay
+      // on via the gear icon (which IS a user gesture), but on some
+      // browsers strict autoplay policies still kick in. Just give up
+      // quietly — the user can hit the per-message ▶ button.
+      console.warn('Autoplay TTS: play() rejected', err);
+      if (autoplayAudio === audio) {
+        autoplayAudio = null;
+        autoplayTargetId = null;
+      }
+    }
+  }
+
   async function sendMessage(text: string, fileIds: number[] = []) {
     if (!selectedThreadId || !selectedBotId) return;
 
@@ -772,6 +873,9 @@
               pendingDebug = null;
               pendingUsage = null;
             }
+            // Autoplay hook: the message is now persisted with a real
+            // id and full content, so it's the right time to TTS it.
+            void autoPlayLastAssistant();
             scrollToBottom();
           })
           .catch(() => {});
@@ -866,6 +970,11 @@
               if (data.message) {
                 messages[msgIndex] = data.message as Message;
                 messages = messages; // trigger reactivity
+                // Autoplay hook: regen gives us the persisted id and
+                // full content inline (no follow-up listMessages call),
+                // so this is the symmetric counterpart to the
+                // post-refresh hook in sendMessage.
+                void autoPlayLastAssistant();
                 // Re-attach dev-mode debug/usage to the new message id.
                 // Regen is special: the done event hands us the new id
                 // synchronously, so we don't need a post-stream refresh.
@@ -1674,9 +1783,9 @@
    * it appears.
    */
   .chat-jump-btn {
-    position: sticky;
+    position: fixed;
     align-self: flex-end;
-    bottom: 16px;
+    bottom: 100px;
     margin-top: -54px; /* overlap the bottom padding so it doesn't push messages */
     width: 38px;
     height: 38px;
