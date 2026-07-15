@@ -327,10 +327,15 @@
     saveError = '';
     saved = false;
     try {
-      // Provider / chat (uses /api/setup/configure because it has provider-specific logic)
+      // Provider / chat (uses /api/setup/configure because it has provider-specific logic).
+      // Empty api_key is a "no change" signal — the backend's _preserve()
+      // helper treats null/empty/"***" identically as "leave the value
+      // alone in .env", so we always send null when the field is blank
+      // (the placeholder '••••' never round-trips). This prevents a
+      // stale blank input from overwriting a working credential.
       const res = await fetch(`${API_BASE}/api/setup/configure`, {
         body: JSON.stringify({
-          api_key: editApiKey,
+          api_key: editApiKey.trim() || null,
           base_url: editBaseUrl,
           chat_model: editModel,
           provider: editProvider,
@@ -349,8 +354,12 @@
         context_compression_threshold: editContextCompressionThreshold,
         // Only send the API key if the user typed something new (not the
         // "••••" placeholder, which means "key is configured, don't change").
+        // null = "no change" — the backend's _preserve() helper maps null,
+        // empty string, and the legacy "***" sentinel all to "leave the
+        // value alone in .env", so a stale blank field can't accidentally
+        // wipe a working credential.
         embedding_api_key:
-          editEmbeddingApiKey && editEmbeddingApiKey !== '••••' ? editEmbeddingApiKey : '',
+          editEmbeddingApiKey && editEmbeddingApiKey !== '••••' ? editEmbeddingApiKey : null,
         embedding_base_url: editEmbeddingBaseUrl,
         embedding_model: editEmbedding,
         fast_model: editFastModel,
@@ -365,12 +374,12 @@
         thread_summary_enabled: editThreadSummaryEnabled,
         thread_summary_interval: editThreadSummaryInterval,
         // ── TTS (text-to-speech) ─────────────────────────────────
-        // Empty string maps to "no change" on the server side —
-        // same convention as the embedding key above. The page's
-        // "configured" badge is driven by the response flag, so
-        // the user gets feedback that the save stuck without us
+        // Same convention as the embedding key above. null means
+        // "no change" — the server keeps the existing TTS key. The
+        // page's "configured" badge is driven by the response flag
+        // so the user gets feedback that the save stuck without us
         // ever round-tripping the actual key.
-        tts_api_key: editTtsApiKey ? editTtsApiKey : undefined,
+        tts_api_key: editTtsApiKey ? editTtsApiKey : null,
         tts_base_url: editTtsBaseUrl,
         tts_cache_dir: editTtsCacheDir,
         tts_model: editTtsModel,

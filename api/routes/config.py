@@ -86,13 +86,38 @@ async def update_config(body: UpdateConfigRequest):
     env_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Apply updates using dotenv helpers
+    #
+    # The frontend uses the string "***" as a sentinel to mean
+    # "no change" for API-key fields — the same convention the
+    # SettingsPage pre-existing code used for the LLM key. We
+    # also treat empty string and whitespace-only values as
+    # "no change" so a stray blank input field can't accidentally
+    # wipe a working credential. None means "don't change"; the
+    # actual clear-key path goes through the dedicated /clear-key
+    # endpoint (no such endpoint yet, but the convention is
+    # preserved here so we don't have to invent a sentinel value).
+    def _preserve(value: object) -> object:
+        """Return None for 'no change' sentinels so the field is skipped."""
+        if value is None:
+            return None
+        if not isinstance(value, str):
+            return value
+        # Strip and check for any of the 'no change' markers the UI
+        # historically used. "***" is the active one; empty/whitespace
+        # catches paste/clear mistakes; the dotenv-style empty quote
+        # ("") is what Set_key writes when you ask it to remove a
+        # value — we never want that path to fire on a save button.
+        if value.strip() in ("", "***"):
+            return None
+        return value
+
     env_updates = {
         "DEFAULT_TEMPERATURE": f"{body.temperature:.1f}" if body.temperature is not None else None,
         "DEFAULT_MAX_TOKENS": str(body.max_tokens) if body.max_tokens is not None else None,
         "FAST_MODEL": body.fast_model,
         "EMBEDDING_MODEL": body.embedding_model,
         "EMBEDDING_BASE_URL": body.embedding_base_url,  # NEW
-        "EMBEDDING_API_KEY": body.embedding_api_key,  # NEW; None = don't change, "" = clear
+        "EMBEDDING_API_KEY": _preserve(body.embedding_api_key),  # None=don't change, ""=clear
         "KNOWLEDGE_RELEVANCE_THRESHOLD": str(body.knowledge_relevance_threshold)
         if body.knowledge_relevance_threshold is not None
         else None,
@@ -124,12 +149,14 @@ async def update_config(body: UpdateConfigRequest):
         else None,
         "HISTORY_LIMIT": str(body.history_limit) if body.history_limit is not None else None,
         # ── TTS (text-to-speech) ─────────────────────────────────
-        # Persisted via the same dotenv set_key + reset_container
-        # dance as the rest of the schema. ``tts_api_key`` writes
-        # an empty string as "" which Settings reads as ``None``
-        # ("use llm_api_key fallback") — see ``Settings.preprocess``.
+        # ``tts_api_key`` accepts "***" (no change) or null/"" (also
+        # no change). The "clear explicit TTS key" path doesn't have
+        # a UI yet; the previous code wrote an empty string to .env
+        # which Settings._preprocess_env then normalised back to
+        # None, so the end-state was equivalent. We now skip the
+        # write entirely so a stray "" can't clobber a real key.
         "TTS_PROVIDER": body.tts_provider,
-        "TTS_API_KEY": body.tts_api_key,
+        "TTS_API_KEY": _preserve(body.tts_api_key),
         "TTS_BASE_URL": body.tts_base_url,
         "TTS_VOICE_ID": body.tts_voice_id,
         "TTS_MODEL": body.tts_model,
