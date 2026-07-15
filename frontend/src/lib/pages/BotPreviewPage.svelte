@@ -210,7 +210,7 @@
         {t('bot_preview.not_found', lang)}
       </p>
       <button
-        class="cursor-pointer border-none bg-transparent font-[Maple_Mono,system-ui,sans-serif] text-[14px] text-[var(--ray-blue)] hover:opacity-80"
+        class="cursor-pointer backdrop-blur-sm font-[Maple_Mono,system-ui,sans-serif] text-[14px] hover:opacity-80"
         onclick={goBack}
         type="button"
       >
@@ -231,7 +231,7 @@
           <GeneratedAvatar name={bot.name} shape="square" block />
         </div>
       {/if}
-      <div class="bp-hero-overlay pointer-events-none absolute inset-x-0 bottom-0 z-[1] h-[70%]"></div>
+      <div class="bp-hero-overlay pointer-events-none absolute inset-x-0 bottom-0 z-1 h-[70%]"></div>
 
       <!-- Hero actions (top-right, glass button + popup menu). Sits
          before the back button visually — back is on the left,
@@ -240,11 +240,11 @@
          popup mirrors the ChatHeader pattern: glass overlay,
          click-outside + Escape close, single shared $effect. -->
       <div
-        class="absolute right-5 top-5 z-[3]"
+        class="absolute right-5 top-5 z-3"
         bind:this={actionsRoot}
       >
         <button
-          class="bp-actions-btn flex h-10 w-10 cursor-pointer items-center justify-center rounded-lg border border-rp-border text-rp-text transition-all duration-150 ease-out hover:border-white/50"
+          class="bp-actions-btn flex backdrop-blur-sm h-10 w-10 cursor-pointer items-center justify-center rounded-lg border border-white/50 shadow text-rp-text transition-all duration-150 ease-out hover:border-white/50"
           class:bp-actions-btn--open={actionsOpen}
           onclick={toggleActions}
           aria-label={t('bot_preview.actions_menu', lang)}
