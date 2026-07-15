@@ -229,7 +229,7 @@
         {/if}
 
         {#if msg.state}
-          <details class="mb-reasoning mb-state" open={stateOpen}>
+          <details class="mb-reasoning mb-state" open={false}>
             <summary>
               <span class="mb-reasoning-dot"></span>
               {t('chat.world_state_label', lang)}
@@ -333,23 +333,7 @@
                 aria-label={t('message.fork', lang)}
                 type="button"
               >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  aria-hidden="true"
-                >
-                  <circle cx="6" cy="5" r="2"></circle>
-                  <circle cx="6" cy="19" r="2"></circle>
-                  <circle cx="18" cy="12" r="2"></circle>
-                  <path d="M6 7v10"></path>
-                  <path d="M6 12c0-3.31 2.69-6 6-6h0"></path>
-                </svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-git-branch-plus-icon lucide-git-branch-plus"><path d="M6 3v12"/><path d="M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M15 6a9 9 0 0 0-9 9"/><path d="M18 15v6"/><path d="M21 18h-6"/></svg>
               </button>
             </Tooltip>
           {/if}

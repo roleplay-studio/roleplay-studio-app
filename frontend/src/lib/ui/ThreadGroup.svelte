@@ -117,9 +117,12 @@
     background: var(--ray-surface, #101111);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
-    border-bottom: 1px solid var(--ray-border-card, rgba(255, 255, 255, 0.06));
+    border-bottom: 3px solid var(--ray-border-card, rgba(255, 255, 255, 0.06));
     isolation: isolate;
     will-change: transform;
+    margin-bottom: 5px;
+    border-radius: 10px;
+    overflow: hidden;
   }
   /* Dark-mode overrides — set the surface to the dark ``--ray-*``
      variables which are globally defined in :root.dark. Earlier
@@ -277,6 +280,8 @@
     font-feature-settings: 'tnum' 1;
     letter-spacing: 0.2px;
     margin-left: auto;
+    position: relative;
+    top: 10px;
   }
 
   .tg-meta {

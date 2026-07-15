@@ -18,13 +18,15 @@ catalog = ProviderCatalog(
     label="DeepSeek",
     description="DeepSeek chat & reasoning models",
     default_base_url="https://api.deepseek.com/v1",
-    default_model="deepseek-chat",
+    default_model="deepseek-v4-pro",
     # ``deepseek-chat`` is the all-rounder; ``deepseek-reasoner`` is
     # the o1-style chain-of-thought model whose ``reasoning_content``
     # stream field needs to be filtered out of the user-visible reply.
     available_models=(
         "deepseek-chat",
         "deepseek-reasoner",
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
     ),
     needs_key=True,
     manual_setup=False,

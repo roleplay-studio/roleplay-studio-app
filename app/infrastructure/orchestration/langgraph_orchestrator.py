@@ -311,6 +311,7 @@ class LangGraphConversationOrchestrator:
         # First message for new threads
         if request.first_message and len(request.history) == 0:
             first_message = self._variable_replace(request.first_message, request)
+            messages.append({"role": "user", "content": '.'})
             messages.append({"role": "assistant", "content": first_message})
 
         # Conversation history

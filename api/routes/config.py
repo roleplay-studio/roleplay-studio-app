@@ -149,6 +149,7 @@ async def update_config(body: UpdateConfigRequest):
     reset_container()
 
     # Re-read and return updated config
+    # TODO(for-assistant): протестировать получше, замечал поломку работы бекенда после сохранения настроек, отправка сообщений в чат возвращает ошибку
     return await get_config()
 
 
