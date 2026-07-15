@@ -130,7 +130,7 @@ const TTSButtonDemo = (): Promise<{ default: Component }> =>
 export const CATALOG: CatalogEntry[] = [
   {
     demo: FoundationsPalette,
-    description: 'Surface / neko / roleplay-studio palette in light + dark mode.',
+    description: 'Surface / neko palette in light + dark mode.',
     group: 'foundations',
     slug: 'foundations-colors',
     snippets: [],

@@ -1,7 +1,21 @@
+<!-- BotPreviewPage.svelte — landing page for a bot before chatting.
+     Shows a hero with bot avatar + categories + name, a primary
+     Start Chat CTA, a hero actions popup (top-right ⋯) with
+     Edit Bot + Import Chat (extensible to more actions later),
+     the bot description, and a recent threads tree at the bottom
+     (with fork support).
+
+     Tailwind v4 — colors via ``bg-[var(--ray-*)]`` arbitrary
+     value syntax. The two token systems (--ray-* from DESIGN.md
+     and --color-surface-* from @theme) coexist by design — see
+     app.css and DESIGN.md "Colors". The custom <style> block at
+     the bottom owns only the pieces Tailwind can't reasonably
+     express (hero overlay gradient, Raycast double-ring shadow
+     on cards). -->
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
 
-  import { api, API_BASE, type Bot, type Persona, type Thread } from '../api';
+  import { api, API_BASE, type Bot, type Persona } from '../api';
   import { currentLang, t } from '../i18n';
   import PersonaSelectModal from '../PersonaSelectModal.svelte';
   import ThreadTree from '../ThreadTree.svelte';
@@ -13,15 +27,29 @@
   let bot: Bot | null = $state(null);
   let loading = $state(true);
   let showPersonaModal = $state(false);
-  let recentThreads: Thread[] = $state([]);
+  let recentThreads = $state<Awaited<ReturnType<typeof api.listBotThreads>>>([]);
   let unsubLang: (() => void) | undefined;
 
-  // Import state
+  // Import state — the popup action calls startImport() which
+  // triggers the hidden <input type="file"> click; we don't have
+  // a UI affordance for loading (the file picker is OS-native),
+  // so importLoading is gone. Keep importError for the inline
+  // banner above Start Chat and importPersonaId for the persona
+  // modal flow.
   let importing = $state(false);
   let importPersonaId: null | number = $state(null);
   let fileInput: HTMLInputElement | undefined = $state();
   let importError = $state('');
-  let importLoading = $state(false);
+
+  // ── Hero actions popover (Edit Bot, Import Chat, ...) ───────
+  // Holds a list of secondary actions on the bot. Currently just
+  // two — edit + import — but the pattern (popup-menu in hero,
+  // glass overlay, click-outside to close) is the canonical place
+  // for any future per-bot utility (Export, Delete, Duplicate,
+  // Share, ...). Don't grow the left-column CTAs; add a row here.
+  let actionsOpen = $state(false);
+  let actionsRoot: HTMLDivElement | undefined = $state();
+  let lastClosedAt = $state(0);
 
   function avatarUrl(path: null | string): null | string {
     if (!path) return null;
@@ -55,8 +83,57 @@
     unsubLang?.();
   });
 
+  // ── Actions popover controls ───────────────────────────────
+  function toggleActions() {
+    // Defensive: prevent the same click that closed the popup
+    // from immediately reopening it (mousedown toggles actionsOpen
+    // to false via the click-outside handler, then the original
+    // button onclick fires and flips it back to true).
+    if (actionsOpen && Date.now() - lastClosedAt < 100) return;
+    actionsOpen = !actionsOpen;
+  }
+  function closeActions() {
+    if (actionsOpen) {
+      actionsOpen = false;
+      lastClosedAt = Date.now();
+    }
+  }
+  function editBotFromMenu() {
+    closeActions();
+    editBot();
+  }
+  function importChatFromMenu() {
+    closeActions();
+    startImport();
+  }
+
+  // Click-outside + Escape close — one shared listener handles
+  // both popovers (right now only the actions menu exists, but
+  // the pattern stays consistent with ChatHeader.svelte).
+  $effect(() => {
+    if (!actionsOpen) return;
+    function onDocClick(e: MouseEvent) {
+      const target = e.target as Node;
+      if (actionsRoot && !actionsRoot.contains(target)) closeActions();
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') closeActions();
+    }
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  });
+
   function goBack() {
     window.location.hash = '#/';
+  }
+
+  function editBot() {
+    if (!bot) return;
+    window.location.hash = `/bots/${bot.id}/edit`;
   }
 
   function onNewThread(threadId: number) {
@@ -87,7 +164,6 @@
     const file = target.files?.[0];
     if (!file || !bot) return;
 
-    importLoading = true;
     importError = '';
     try {
       const result = await api.importChat(bot.id, file, importPersonaId);
@@ -95,38 +171,161 @@
       setTimeout(() => {
         window.location.hash = `/chat?bot=${bot!.id}&thread=${result.thread_id}`;
       }, 600);
-    } catch (e: any) {
-      importError = e?.detail || e?.message || t('bot_preview.import_failed', lang);
+    } catch (e: unknown) {
+      const err = e as { detail?: string; message?: string };
+      importError = err.detail || err.message || t('bot_preview.import_failed', lang);
     } finally {
-      importLoading = false;
       importing = false;
       target.value = '';
     }
   }
+
+  // Bot-type badge: small color-coded label that signals the
+  // bot's mode (RP = full roleplay, Assistant = utility, Agent =
+  // tool-using). Colors map to existing semantic tokens — no new
+  // hues introduced.
+  function botTypeVariant(type: string): { label: string; toneClass: string } {
+    if (type === 'assistant') {
+      return { label: 'Assistant', toneClass: 'text-[var(--ray-green)]' };
+    }
+    if (type === 'agent') {
+      return { label: 'Agent', toneClass: 'text-[var(--ray-yellow)]' };
+    }
+    return { label: 'RP', toneClass: 'text-[var(--ray-blue)]' };
+  }
+  const typeBadge = $derived.by(() => {
+    if (!bot) return { label: '', toneClass: '' };
+    return botTypeVariant(bot.bot_type);
+  });
 </script>
 
-<div class="bp-page">
+<div class="bp-page min-h-screen text-rp-text">
   {#if loading}
-    <div class="bp-loading"><Loading size="lg" /></div>
+    <div class="flex justify-center py-20">
+      <Loading size="lg" />
+    </div>
   {:else if !bot}
-    <div class="bp-notfound">
-      <p>{t('bot_preview.not_found', lang)}</p>
-      <button class="bp-back-link" onclick={goBack}>← {t('bot_preview.back', lang)}</button>
+    <div class="px-4 py-20 text-center">
+      <p class="mb-2 text-[16px] text-[var(--ray-text-secondary)]">
+        {t('bot_preview.not_found', lang)}
+      </p>
+      <button
+        class="cursor-pointer border-none bg-transparent font-[Maple_Mono,system-ui,sans-serif] text-[14px] text-[var(--ray-blue)] hover:opacity-80"
+        onclick={goBack}
+        type="button"
+      >
+        ← {t('bot_preview.back', lang)}
+      </button>
     </div>
   {:else}
-    <!-- Hero -->
-    <div class="bp-hero">
+    <!-- ─── Hero ────────────────────────────────────────────── -->
+    <div class="bp-hero relative h-[280px] w-full overflow-hidden">
       {#if bot.avatar_path}
-        <img src={avatarUrl(bot.avatar_path)} alt={bot.name} class="bp-hero-img" />
+        <img
+          src={avatarUrl(bot.avatar_path)}
+          alt={bot.name}
+          class="bp-hero-img h-full w-full object-cover object-top"
+        />
       {:else}
-        <div class="bp-hero-placeholder">
+        <div class="bp-hero-placeholder flex h-full w-full items-center justify-center">
           <GeneratedAvatar name={bot.name} shape="square" block />
         </div>
       {/if}
-      <div class="bp-hero-overlay"></div>
+      <div class="bp-hero-overlay pointer-events-none absolute inset-x-0 bottom-0 z-[1] h-[70%]"></div>
 
-      <!-- Back button -->
-      <button class="bp-back-btn" onclick={goBack}>
+      <!-- Hero actions (top-right, glass button + popup menu). Sits
+         before the back button visually — back is on the left,
+         actions are on the right; the eye reads "navigation" on
+         the left and "operations on this bot" on the right. The
+         popup mirrors the ChatHeader pattern: glass overlay,
+         click-outside + Escape close, single shared $effect. -->
+      <div
+        class="absolute right-5 top-5 z-[3]"
+        bind:this={actionsRoot}
+      >
+        <button
+          class="bp-actions-btn flex h-10 w-10 cursor-pointer items-center justify-center rounded-lg border border-rp-border text-rp-text transition-all duration-150 ease-out hover:border-white/50"
+          class:bp-actions-btn--open={actionsOpen}
+          onclick={toggleActions}
+          aria-label={t('bot_preview.actions_menu', lang)}
+          aria-haspopup="true"
+          aria-expanded={actionsOpen}
+          type="button"
+        >
+          <svg
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            aria-hidden="true"
+            ><circle cx="12" cy="5" r="2"></circle><circle cx="12" cy="12" r="2"></circle><circle
+              cx="12"
+              cy="19"
+              r="2"
+            ></circle></svg
+          >
+        </button>
+        {#if actionsOpen}
+          <div
+            class="bp-actions-popup"
+            role="menu"
+            aria-label={t('bot_preview.actions_menu', lang)}
+          >
+            <button
+              class="bp-actions-item"
+              role="menuitem"
+              type="button"
+              onclick={editBotFromMenu}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+                ><path d="M12 20h9"></path><path
+                  d="M16.5 3.5a2.121 2.121 0 113 3L7 19l-4 1 1-4 12.5-12.5z"
+                ></path></svg
+              >
+              <span>{t('bot_preview.edit_bot', lang)}</span>
+            </button>
+            <button
+              class="bp-actions-item"
+              role="menuitem"
+              type="button"
+              onclick={importChatFromMenu}
+            >
+              <svg
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+                ><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path><polyline
+                  points="17 8 12 3 7 8"
+                ></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg
+              >
+              <span>{t('bot_preview.import_chat', lang)}</span>
+            </button>
+          </div>
+        {/if}
+      </div>
+
+      <!-- Back button (top-left, glass) -->
+      <button
+        class="bp-back-btn absolute left-5 top-5 z-[3] flex h-9 w-9 cursor-pointer items-center justify-center rounded-lg border border-white/[0.15] text-white transition-all duration-150 ease-out hover:bg-[var(--ray-surface)] hover:text-[var(--ray-text)]"
+        onclick={goBack}
+        aria-label={t('bot_preview.back', lang)}
+        type="button"
+      >
         <svg
           width="16"
           height="16"
@@ -135,41 +334,75 @@
           stroke="currentColor"
           stroke-width="2"
           stroke-linecap="round"
-          stroke-linejoin="round"><polyline points="15 18 9 12 15 6"></polyline></svg
+          stroke-linejoin="round"
+          ><polyline points="15 18 9 12 15 6"></polyline></svg
         >
       </button>
 
-      <!-- Hero content -->
-      <div class="bp-hero-content">
-        <div class="bp-hero-cats">
+      <div class="absolute inset-x-12 bottom-8 z-[2]">
+        <div class="mb-3 flex flex-wrap items-center gap-1.5">
           {#each bot.categories as cat (cat)}
-            <span class="bp-hero-cat">{cat}</span>
+            <span
+              class="rounded-full border border-white/[0.08] bg-[color-mix(in_srgb,var(--ray-surface)_70%,transparent)] px-3 py-[3px] font-[Maple_Mono,system-ui,sans-serif] text-[11px] font-medium tracking-[0.3px] text-[var(--ray-text)] backdrop-blur-[8px]"
+            >
+              {cat}
+            </span>
           {/each}
           <span
-            class="bp-hero-type"
-            class:rp={bot.bot_type === 'rp'}
-            class:assistant={bot.bot_type === 'assistant'}
-            class:agent={bot.bot_type === 'agent'}
+            class="rounded-full border border-white/[0.08] bg-[color-mix(in_srgb,var(--ray-surface)_70%,transparent)] px-3 py-[3px] font-[Maple_Mono,system-ui,sans-serif] text-[10px] font-semibold uppercase tracking-[0.3px] backdrop-blur-[8px] {typeBadge.toneClass}"
           >
-            {bot.bot_type === 'assistant' ? 'Assistant' : bot.bot_type === 'agent' ? 'Agent' : 'RP'}
+            {typeBadge.label}
           </span>
         </div>
-        <h1 class="bp-hero-name">{bot.name}</h1>
+        <h1
+          class="m-0 font-[Maple_Mono,system-ui,sans-serif] text-[32px] font-semibold tracking-[0.2px] text-white"
+          style="text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);"
+        >
+          {bot.name}
+        </h1>
       </div>
     </div>
 
-    <!-- Two-column content -->
-    <div class="bp-layout">
+    <!-- ─── Two-column content ──────────────────────────────── -->
+    <div class="bp-layout mx-auto grid max-w-[960px] grid-cols-[1fr_260px] items-start gap-8 px-12 pt-8 pb-6">
       <!-- Left column -->
-      <div class="bp-left">
+      <div class="flex min-w-0 flex-col gap-4">
         <!-- Description -->
         {#if bot.description}
-          <div class="bp-card">
-            <p class="bp-desc-text">{bot.description}</p>
+          <div
+            class="bp-card rounded-xl border border-[var(--ray-border-card)] bg-[var(--ray-surface)] p-5"
+          >
+            <p
+              class="m-0 whitespace-pre-wrap font-[Maple_Mono,system-ui,sans-serif] text-[14px] leading-[1.7] tracking-[0.2px] text-[var(--ray-text)]"
+            >
+              {bot.description}
+            </p>
           </div>
         {/if}
-        <!-- Start Chat -->
-        <button class="bp-start-btn" onclick={() => (showPersonaModal = true)}>
+
+        <!--
+          Import error banner. Shown above Start Chat so the user
+          sees the failure immediately after the popup-triggered
+          import. The popup itself just kicks off the file picker
+          and clears the error — the banner is the visual
+          acknowledgement that something went wrong.
+        -->
+        {#if importError}
+          <div
+            class="rounded-lg border border-[color-mix(in_srgb,var(--ray-red)_30%,transparent)] bg-[color-mix(in_srgb,var(--ray-red)_10%,transparent)] px-4 py-2.5 text-center font-[Maple_Mono,system-ui,sans-serif] text-[12px] tracking-[0.2px] text-[var(--ray-red)]"
+            role="alert"
+          >
+            {importError}
+          </div>
+        {/if}
+
+        <!-- Start Chat — primary CTA -->
+        <button
+          class="bp-start-btn inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-full border-none px-7 py-3.5 font-[Maple_Mono,system-ui,sans-serif] text-[15px] font-semibold tracking-[0.3px] transition-opacity duration-150 ease-out hover:opacity-85"
+          style="background: color-mix(in srgb, var(--ray-text) 90%, transparent); color: var(--ray-bg);"
+          onclick={() => (showPersonaModal = true)}
+          type="button"
+        >
           <svg
             width="16"
             height="16"
@@ -184,36 +417,12 @@
           {t('bot_preview.start_chat', lang)}
         </button>
 
-        <!-- Import Chat -->
-        {#if importError}
-          <div class="bp-import-error">{importError}</div>
-        {/if}
-        <button
-          class="bp-start-btn"
-          class:bp-import-loading={importLoading}
-          style="background: color-mix(in srgb, var(--bp-text) 5%, transparent); color: var(--bp-text);"
-          onclick={startImport}
-          disabled={importLoading}
-        >
-          {#if importLoading}
-            <Loading size="sm" />
-          {:else}
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              ><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path><polyline
-                points="17 8 12 3 7 8"
-              ></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg
-            >
-          {/if}
-          {t('bot_preview.import_chat', lang)}
-        </button>
+        <!--
+          Edit Bot + Import Chat moved to the hero actions popup
+          (top-right ⋯ button) — see "Hero actions" comment
+          above. The hidden file input stays here so the popup
+          action can trigger it via the startImport() handler.
+        -->
         <input
           type="file"
           accept=".json"
@@ -224,14 +433,20 @@
       </div>
 
       <!-- Right column — poster -->
-      <div class="bp-right">
+      <div class="bp-right sticky top-6">
         <div
-          class="bp-poster hover:scale-110 transform-gpu transition-transform duration-300 ease-in-out"
+          class="bp-poster overflow-hidden rounded-[14px] transition-transform duration-300 ease-in-out hover:scale-[1.04]"
         >
           {#if bot.avatar_path}
-            <img src={avatarUrl(bot.avatar_path)} alt={bot.name} class="bp-poster-img" />
+            <img
+              src={avatarUrl(bot.avatar_path)}
+              alt={bot.name}
+              class="block aspect-[3/4] w-full object-cover"
+            />
           {:else}
-            <div class="bp-poster-placeholder">
+            <div
+              class="flex aspect-[3/4] w-full items-center justify-center bg-gradient-to-br from-[#8b5cf6] to-[#06b6d4] text-[72px] font-bold text-white"
+            >
               {bot.name.charAt(0).toUpperCase()}
             </div>
           {/if}
@@ -239,18 +454,39 @@
       </div>
     </div>
 
-    <!-- Recent chats — thread tree (roots + indented forks) -->
-    {#if recentThreads.length > 0}
-      <div class="bp-recent">
-        <h2 class="bp-recent-title">{t('chat.tree.title', lang)}</h2>
+    <!--
+      Recent chats — full-width section below the hero. Lives
+      OUTSIDE the .bp-layout grid so the threads tree can use
+      the full 960px width when there are long fork chains.
+    -->
+    <section class="mx-auto max-w-[960px] px-12 pb-12">
+      <div class="mb-3 flex items-baseline justify-between">
+        <h2
+          class="m-0 font-[Maple_Mono,system-ui,sans-serif] text-[12px] font-semibold uppercase tracking-[0.5px] text-[var(--ray-text-tertiary)]"
+        >
+          {t('chat.tree.title', lang)}
+        </h2>
+        {#if recentThreads.length > 0}
+          <span
+            class="font-[Maple_Mono,system-ui,sans-serif] text-[11px] tabular-nums tracking-[0.2px] text-[var(--ray-text-tertiary)]"
+            aria-label={t('chat.tree.total_count_aria', lang, { n: recentThreads.length })}
+          >
+            {t('chat.tree.total_count', lang, { n: recentThreads.length })}
+          </span>
+        {/if}
+      </div>
+      <div
+        class="rounded-xl border border-[var(--ray-border-card)] bg-[color-mix(in_srgb,var(--ray-surface)_50%,transparent)] p-2"
+      >
         <ThreadTree
           threads={recentThreads}
+          botAvatarPath={bot.avatar_path}
           onselectThread={(_, threadId) => openThread(threadId)}
           botId={bot?.id ?? 0}
           {lang}
         />
       </div>
-    {/if}
+    </section>
   {/if}
 </div>
 
@@ -268,385 +504,51 @@
 />
 
 <style>
-  /* ── CSS variables — light ── */
-  :root {
-    --bp-bg: var(--ray-bg, #f5f5f7);
-    --bp-bg-card: var(--ray-surface, #ffffff);
-    --bp-border: var(--ray-border, rgba(0, 0, 0, 0.06));
-    --bp-border-strong: var(--ray-border-strong, rgba(0, 0, 0, 0.1));
-    --bp-text: var(--ray-text, #1d1d1f);
-    --bp-text-secondary: var(--ray-text-secondary, #6e6e73);
-    --bp-text-tertiary: var(--ray-text-tertiary, #86868b);
-    --bp-shadow-ring: var(--ray-shadow-ring, rgba(0, 0, 0, 0.04));
-    --bp-shadow-inset: var(--ray-shadow-inset, rgba(0, 0, 0, 0.02));
-    --bp-blue: var(--ray-blue, hsl(211, 100%, 50%));
-  }
+  /* ── Pieces Tailwind can't reasonably express ───────────────
+     The hero overlay is a vertical gradient (3-stop fade) that
+     gives the bot name legibility against any avatar — pure
+     linear-gradient with a custom angle. The Raycast double-ring
+     shadow on .bp-card is a 2-layer box-shadow that the design
+     system explicitly encodes (see DESIGN.md "Elevation &
+     Depth"). The poster shadow is the same double-ring plus a
+     generous drop shadow.
+     Everything else lives in the template as Tailwind utilities. */
 
-  .bp-page {
-    color: var(--bp-text);
-    min-height: 100vh;
-  }
-
-  /* ─── Loading / Not found ─── */
-  .bp-loading {
-    display: flex;
-    justify-content: center;
-    padding: 80px 0;
-  }
-  .bp-notfound {
-    text-align: center;
-    padding: 80px 0;
-  }
-  .bp-notfound p {
-    font-size: 16px;
-    color: var(--bp-text-secondary);
-    margin-bottom: 8px;
-  }
-  .bp-back-link {
-    background: none;
-    border: none;
-    color: var(--bp-blue);
-    cursor: pointer;
-    font-family: 'Maple Mono', sans-serif;
-    font-size: 14px;
-  }
-
-  /* ─── Hero ─── */
   .bp-hero {
-    position: relative;
-    width: 100%;
-    height: 280px;
-    overflow: hidden;
-    background: color-mix(in srgb, var(--bp-text) 3%, transparent);
-  }
-  .bp-hero-img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    object-position: top;
-  }
-  .bp-hero-placeholder {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    background: color-mix(in srgb, var(--ray-text) 3%, transparent);
   }
   .bp-hero-overlay {
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 70%;
-    background: linear-gradient(to top, var(--bp-bg) 15%, transparent);
-    pointer-events: none;
-  }
-  .bp-back-btn {
-    position: absolute;
-    top: 20px;
-    left: 20px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 8px;
-    background: color-mix(in srgb, var(--bp-bg-card) 60%, transparent);
-    backdrop-filter: blur(8px);
-    color: #fff;
-    cursor: pointer;
-    transition: all 0.12s ease;
-    z-index: 2;
-  }
-  .bp-back-btn:hover {
-    background: var(--bp-bg-card);
-    color: var(--bp-text);
+    background: linear-gradient(
+      to top,
+      var(--ray-bg, #07080a) 15%,
+      transparent
+    );
   }
 
-  .bp-hero-content {
-    position: absolute;
-    bottom: 32px;
-    left: 48px;
-    right: 48px;
-    z-index: 2;
-  }
-  .bp-hero-cats {
-    display: flex;
-    gap: 6px;
-    flex-wrap: wrap;
-    margin-bottom: 12px;
-  }
-  .bp-hero-cat {
-    font-family: 'Maple Mono', sans-serif;
-    font-size: 11px;
-    font-weight: 500;
-    padding: 3px 12px;
-    border-radius: 86px;
-    background: color-mix(in srgb, var(--bp-bg-card) 70%, transparent);
-    backdrop-filter: blur(8px);
-    color: var(--bp-text);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    letter-spacing: 0.3px;
-  }
-  .bp-hero-type {
-    font-family: 'Maple Mono', sans-serif;
-    font-size: 10px;
-    font-weight: 600;
-    text-transform: uppercase;
-    padding: 3px 12px;
-    border-radius: 86px;
-    background: color-mix(in srgb, var(--bp-bg-card) 70%, transparent);
-    backdrop-filter: blur(8px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    letter-spacing: 0.3px;
-  }
-  .bp-hero-type.rp {
-    color: var(--bp-blue);
-  }
-  .bp-hero-type.assistant {
-    color: #5fc992;
-  }
-  .bp-hero-type.agent {
-    color: #f59e0b;
-  }
-  .bp-hero-name {
-    font-family: 'Maple Mono', sans-serif;
-    font-size: 32px;
-    font-weight: 600;
-    color: #fff;
-    margin: 0;
-    text-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-    letter-spacing: 0.2px;
-  }
-
-  /* ─── Two-column layout ─── */
-  .bp-layout {
-    max-width: 960px;
-    margin: 0 auto;
-    padding: 32px 48px 24px;
-    display: grid;
-    grid-template-columns: 1fr 260px;
-    gap: 32px;
-    align-items: start;
-  }
-
-  .bp-left {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    min-width: 0;
-  }
-
-  /* ─── Card ─── */
+  /* Raycast double-ring on description card. */
   .bp-card {
-    background: var(--bp-bg-card);
-    border: 1px solid var(--bp-border);
-    border-radius: 12px;
-    padding: 20px;
     box-shadow:
-      var(--bp-shadow-ring) 0px 0px 0px 1px,
-      var(--bp-shadow-inset) 0px 0px 0px 1px inset;
-  }
-  .bp-section-title {
-    font-family: 'Maple Mono', system-ui, sans-serif;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--bp-text-tertiary);
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
-    margin: 0 0 10px;
-  }
-  .bp-desc-text {
-    font-family: 'Maple Mono', system-ui, sans-serif;
-    font-size: 14px;
-    font-weight: 400;
-    color: var(--bp-text);
-    letter-spacing: 0.2px;
-    line-height: 1.7;
-    margin: 0;
-    white-space: pre-wrap;
-  }
-  .bp-fm {
-    font-family: 'Maple Mono', system-ui, sans-serif;
-    font-size: 14px;
-    line-height: 1.7;
-    color: var(--bp-text-secondary);
+      var(--ray-shadow-ring, rgba(0, 0, 0, 0.04)) 0px 0px 0px 1px,
+      var(--ray-shadow-inset, rgba(0, 0, 0, 0.02)) 0px 0px 0px 1px inset;
   }
 
-  /* ─── Poster (right column) ─── */
-  .bp-right {
-    position: sticky;
-    top: 24px;
-  }
+  /* Poster has the double-ring PLUS a soft drop shadow — it
+     needs to feel like a physical card sitting on the page. */
   .bp-poster {
-    border-radius: 14px;
-    overflow: hidden;
     box-shadow:
-      var(--bp-shadow-ring) 0px 0px 0px 1px,
+      var(--ray-shadow-ring, rgba(0, 0, 0, 0.04)) 0px 0px 0px 1px,
       0 8px 32px rgba(0, 0, 0, 0.2);
   }
-  .bp-poster-img {
-    width: 100%;
-    aspect-ratio: 3 / 4;
-    object-fit: cover;
-    display: block;
-  }
-  .bp-poster-placeholder {
-    width: 100%;
-    aspect-ratio: 3 / 4;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 72px;
-    font-weight: 700;
-    background: linear-gradient(135deg, #8b5cf6, #06b6d4);
-    color: #fff;
-  }
 
-  /* ─── Start Chat button ─── */
-  .bp-start-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    padding: 14px 28px;
-    border-radius: 86px;
-    border: none;
-    background: color-mix(in srgb, var(--bp-text) 90%, transparent);
-    color: var(--bp-bg);
-    font-family: 'Maple Mono', system-ui, sans-serif;
-    font-size: 15px;
-    font-weight: 600;
-    letter-spacing: 0.3px;
-    cursor: pointer;
-    transition: opacity 0.15s ease;
-    width: 100%;
-    margin-top: 4px;
-  }
-  .bp-start-btn:hover {
-    opacity: 0.85;
-  }
-
-  /* ─── Import chat ─── */
-  .bp-import-error {
-    font-family: 'Maple Mono', sans-serif;
-    font-size: 13px;
-    color: #ef4444;
-    margin-bottom: 8px;
-    text-align: center;
-  }
-  .bp-import-loading {
-    cursor: wait;
-    opacity: 0.7;
-  }
-
-  /* ─── Recent chats ─── */
-  .bp-recent {
-    max-width: 960px;
-    margin: 0 auto;
-    padding: 0 48px 48px;
-  }
-  .bp-recent-title {
-    font-family: 'Maple Mono', system-ui, sans-serif;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--bp-text-tertiary);
-    letter-spacing: 0.5px;
-    text-transform: uppercase;
-    margin: 0 0 12px;
-  }
-  .bp-recent-list {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .bp-recent-item {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
-    background: var(--bp-bg-card);
-    border: 1px solid var(--bp-border);
-    border-radius: 10px;
-    cursor: pointer;
-    transition: all 0.12s ease;
-    text-align: left;
-    width: 100%;
-    box-shadow: var(--bp-shadow-ring) 0px 0px 0px 1px;
-  }
-  .bp-recent-item:hover {
-    border-color: var(--bp-border-strong);
-    background: color-mix(in srgb, var(--bp-text) 3%, var(--bp-bg-card));
-  }
-  .bp-recent-avatar {
-    flex-shrink: 0;
-    width: 36px;
-    height: 36px;
-    border-radius: 8px;
-    overflow: hidden;
-  }
-  .bp-recent-avatar img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-  .bp-recent-avatar-ph {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-family: 'Maple Mono', sans-serif;
-    font-size: 14px;
-    font-weight: 600;
-    background: color-mix(in srgb, var(--bp-text) 8%, transparent);
-    color: var(--bp-text-secondary);
-  }
-  .bp-recent-info {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-  .bp-recent-persona {
-    font-family: 'Maple Mono', sans-serif;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--bp-text);
-    letter-spacing: 0.2px;
-  }
-  .bp-recent-preview {
-    font-family: 'Maple Mono', sans-serif;
-    font-size: 12px;
-    color: var(--bp-text-tertiary);
-    letter-spacing: 0.1px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .bp-recent-preview.bp-recent-summary {
-    color: var(--bp-text);
-    font-style: italic;
-  }
-  .bp-recent-time {
-    font-family: 'Maple Mono', sans-serif;
-    font-size: 11px;
-    color: var(--bp-text-tertiary);
-    letter-spacing: 0.1px;
-    flex-shrink: 0;
-  }
-
-  /* ─── Responsive ─── */
+  /* ── Responsive ─────────────────────────────────────────── */
   @media (max-width: 768px) {
     .bp-hero {
       height: 200px;
     }
-    .bp-hero-name {
+    .bp-hero h1 {
       font-size: 24px;
     }
-    .bp-hero-content {
+    .bp-hero > div:last-child {
       left: 20px;
       right: 20px;
       bottom: 20px;
@@ -654,12 +556,66 @@
     .bp-layout {
       grid-template-columns: 1fr;
       padding: 20px 16px 24px;
+      gap: 20px;
     }
     .bp-right {
       display: none;
     }
-    .bp-recent {
-      padding: 0 16px 32px;
+    section {
+      padding-left: 16px;
+      padding-right: 16px;
+      padding-bottom: 32px;
     }
+  }
+
+  /* ── Hero actions popover ───────────────────────────────────
+     Glass overlay anchored to the top-right ⋯ button. Uses
+     the same visual shell as ChatHeader.ch-menu — backdrop-
+     blur + 1px border + soft drop shadow — so the user sees a
+     consistent popover family across the app.
+
+     ``.bp-actions-btn--open`` keeps the trigger visually
+     distinct while the popup is mounted (matches the
+     ChatHeader.ch-btn.active pattern). */
+  .bp-actions-btn--open {
+    background: var(--ray-surface);
+    color: var(--ray-text);
+  }
+  .bp-actions-popup {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 200px;
+    padding: 4px;
+    background: color-mix(in srgb, var(--ray-surface) 92%, transparent);
+    border: 1px solid var(--ray-border-strong);
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .bp-actions-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: none;
+    background: transparent;
+    color: var(--ray-text);
+    font-family: 'Maple Mono', system-ui, sans-serif;
+    font-size: 13px;
+    font-weight: 500;
+    border-radius: 6px;
+    cursor: pointer;
+    text-align: left;
+    transition: background 0.1s ease;
+    white-space: nowrap;
+  }
+  .bp-actions-item:hover {
+    background: color-mix(in srgb, var(--ray-text) 5%, transparent);
   }
 </style>

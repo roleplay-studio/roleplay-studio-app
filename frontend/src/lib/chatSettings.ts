@@ -32,32 +32,8 @@ const DEFAULTS: ChatSettings = {
 let _current: ChatSettings = load() ?? { ...DEFAULTS };
 let _listeners: Array<(s: ChatSettings) => void> = [];
 
-function load(): ChatSettings | null {
-  try {
-    if (typeof localStorage === 'undefined') return null;
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    // Defensive merge — unknown keys are dropped, missing keys
-    // fall back to defaults so a partial write doesn't break reads.
-    return { ...DEFAULTS, ...parsed };
-  } catch {
-    // Corrupt JSON / quota / private mode — ignore and start clean.
-    return null;
-  }
-}
-
-function persist(s: ChatSettings) {
-  try {
-    if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
-  } catch {
-    /* localStorage may be unavailable; the in-memory copy still works. */
-  }
-}
-
-function notify() {
-  for (const fn of _listeners) fn(_current);
+export function getAutoplayTts(): boolean {
+  return _current.autoplayTts;
 }
 
 /** Read-only snapshot. */
@@ -65,8 +41,15 @@ export function getChatSettings(): ChatSettings {
   return _current;
 }
 
-export function getAutoplayTts(): boolean {
-  return _current.autoplayTts;
+/** Subscribe to changes. Returns an unsubscribe fn. */
+export function onChatSettingsChange(fn: (s: ChatSettings) => void): () => void {
+  _listeners.push(fn);
+  // Fire once with the current value so callers can sync their
+  // local $state on mount without a separate getter call.
+  fn(_current);
+  return () => {
+    _listeners = _listeners.filter((l) => l !== fn);
+  };
 }
 
 export function setAutoplayTts(value: boolean): void {
@@ -86,13 +69,30 @@ export function updateChatSettings(patch: Partial<ChatSettings>): void {
   notify();
 }
 
-/** Subscribe to changes. Returns an unsubscribe fn. */
-export function onChatSettingsChange(fn: (s: ChatSettings) => void): () => void {
-  _listeners.push(fn);
-  // Fire once with the current value so callers can sync their
-  // local $state on mount without a separate getter call.
-  fn(_current);
-  return () => {
-    _listeners = _listeners.filter((l) => l !== fn);
-  };
+function load(): ChatSettings | null {
+  try {
+    if (typeof localStorage === 'undefined') return null;
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    // Defensive merge — unknown keys are dropped, missing keys
+    // fall back to defaults so a partial write doesn't break reads.
+    return { ...DEFAULTS, ...parsed };
+  } catch {
+    // Corrupt JSON / quota / private mode — ignore and start clean.
+    return null;
+  }
+}
+
+function notify() {
+  for (const fn of _listeners) fn(_current);
+}
+
+function persist(s: ChatSettings) {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(s));
+  } catch {
+    /* localStorage may be unavailable; the in-memory copy still works. */
+  }
 }

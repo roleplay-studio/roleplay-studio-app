@@ -14,8 +14,10 @@
     type ThreadFileDTO,
     type ThreadStats,
   } from '../api';
+  import { ttsApi, TTSDisabledError } from '../api';
   import ChatHeader from '../ChatHeader.svelte';
   import ChatInput from '../ChatInput.svelte';
+  import { getAutoplayTts } from '../chatSettings';
   import DeleteConfirmModal from '../DeleteConfirmModal.svelte';
   import EditMessageModal from '../EditMessageModal.svelte';
   import { currentLang, t } from '../i18n';
@@ -31,8 +33,6 @@
   import { attachInfiniteScroll } from '../utils/infiniteScrollSentinel';
   import { dismissNotification, isNotificationDismissed } from '../utils/notificationStore';
   import { parseMessageContent } from '../utils/parseMetadata';
-  import { ttsApi, TTSDisabledError } from '../api';
-  import { getAutoplayTts } from '../chatSettings';
   import { captureScrollAnchor, restoreScrollAnchor } from '../utils/scrollAnchor';
 
   // Dev-mode gate for the LLM debug modal. Vite's import.meta.env.DEV

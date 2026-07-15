@@ -80,12 +80,10 @@
     return raw !== 'false';
   }
   let reasoningOpen = $state(readReasoningOpen());
-  // Floating system-prompt panel starts collapsed; world-state opens
-  // by default since state is the most useful debug signal. Both stay
-  // per-message (no shared localStorage key) — the reasoning pattern
-  // uses one global because it's usually small; prompt and state can
-  // be longer and vary turn-to-turn, so per-bubble state is simpler.
-  let stateOpen = $state(true);
+  // World-state (mb-state) panel stays collapsed by default — most
+  // readers don't need it. To re-introduce per-message state
+  // toggle, restore ``let stateOpen = $state(true)`` and bind
+  // ``open={stateOpen}`` on the <details class="mb-state"> below.
   function onReasoningToggle(e: Event) {
     const el = e.currentTarget as HTMLDetailsElement;
     reasoningOpen = el.open;
