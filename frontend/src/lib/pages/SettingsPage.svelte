@@ -219,15 +219,32 @@
 
   onMount(async () => {
     try {
-      const [cfg, provs, langs] = await Promise.all([
+      const [cfg, provRes, langs] = await Promise.all([
         api.config(),
-        fetch(`${API_BASE}/api/setup/providers`).then((r) => r.json()),
+        fetch(`${API_BASE}/api/setup/providers`),
         fetch(`${API_BASE}/api/config/languages`).then((r) => r.json()),
       ]);
+      // /api/setup/providers returns { providers: [...], selected_provider: "..." }
+      // (see api/routes/setup.py::list_providers and the matching unwrap in
+      // SetupWizard.svelte). The previous line assigned the whole object to
+      // ``providers``, so the {#each providers as p} block iterated over the
+      // top-level keys ("providers", "selected_provider") and rendered nothing
+      // on /settings.
+      const provData: { providers: Provider[]; selected_provider?: string } = provRes.ok
+        ? await provRes.json()
+        : { providers: [] };
       config = cfg;
-      providers = provs;
+      providers = provData.providers ?? [];
       languages = langs;
-      editProvider = 'openrouter';
+      // Honour the server-side selected_provider (driven by
+      // Settings.llm_provider) on reload so the dropdown reflects
+      // what's actually in .env instead of hardcoding 'openrouter'.
+      // Falls back to first catalog entry when .env drifts out of sync
+      // — same defensive pattern as SetupWizard.svelte::onMount.
+      const knownIds = new Set(providers.map((p) => p.id));
+      editProvider = provData.selected_provider && knownIds.has(provData.selected_provider)
+        ? provData.selected_provider
+        : (providers[0]?.id ?? 'openrouter');
       editBaseUrl = cfg.llm_base_url;
       editModel = cfg.chat_model;
       editTemperature = cfg.default_temperature;

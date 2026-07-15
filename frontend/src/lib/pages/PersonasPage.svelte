@@ -3,7 +3,7 @@
 
   import { api, API_BASE, type Persona } from '../api';
   import { currentLang, t } from '../i18n';
-  import { Input, Loading, Textarea } from '../ui';
+  import { Button, GeneratedAvatar, Input, Loading, Modal, Textarea } from '../ui';
 
   let lang = $state('en');
   let unsubLang: (() => void) | undefined;
@@ -19,6 +19,10 @@
 
   // Delete confirm
   let deletingId = $state<null | number>(null);
+  let deletingName = $state('');
+  // Derived boolean for the delete-confirm dialog (Modal wants a
+  // bindable bool, not a nullable id).
+  let deleteDialogOpen = $derived(deletingId !== null);
 
   onMount(() => {
     unsubLang = currentLang.subscribe((v) => (lang = v));
@@ -101,8 +105,9 @@
     }
   }
 
-  function confirmDelete(id: number) {
+  function confirmDelete(id: number, name: string) {
     deletingId = id;
+    deletingName = name;
   }
 
   async function doDelete() {
@@ -110,6 +115,7 @@
     try {
       await api.deletePersona(deletingId);
       deletingId = null;
+      deletingName = '';
       await load();
     } catch (e) {
       console.error('Delete failed:', e);
@@ -118,6 +124,7 @@
 
   function cancelDelete() {
     deletingId = null;
+    deletingName = '';
   }
 </script>
 
@@ -128,7 +135,7 @@
       <h1 class="pp-title">{t('personas.title', lang)}</h1>
       <p class="pp-subtitle">{t('personas.subtitle', lang)}</p>
     </div>
-    <button class="ray-btn primary" onclick={openCreate}>
+    <Button variant="primary" size="md" onclick={openCreate}>
       <svg
         width="14"
         height="14"
@@ -138,11 +145,12 @@
         stroke-width="2"
         stroke-linecap="round"
         stroke-linejoin="round"
-        ><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"
-        ></line></svg
       >
+        <line x1="12" y1="5" x2="12" y2="20"></line>
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </svg>
       {t('personas.new', lang)}
-    </button>
+    </Button>
   </header>
 
   {#if personas.length === 0}
@@ -161,154 +169,184 @@
   {:else}
     <div class="pp-grid">
       {#each personas as p (p.id)}
-        <div class="pp-card">
-          <div class="pp-card-top">
-            <div class="pp-card-info">
-              {#if p.avatar_path}
-                <img src={avatarUrl(p.avatar_path)} alt={p.name} class="pp-avatar" />
-              {:else}
-                <div class="pp-avatar-placeholder">
-                  {p.name[0]?.toUpperCase() || '?'}
-                </div>
-              {/if}
-              <div>
-                <h3 class="pp-name">{p.name}</h3>
-                <p class="pp-desc">{p.description || t('personas.no_description', lang)}</p>
+        <!-- The whole card is clickable → opens the edit modal
+             (mirrors BotCard's bc-clickable affordance). Action
+             buttons stopPropagation so e.g. delete fires on the
+             btn, not the card.                                  -->
+        <article
+          class="pp-card pp-clickable"
+          role="button"
+          tabindex="0"
+          onclick={() => openEdit(p)}
+          onkeydown={(e) => e.key === 'Enter' && openEdit(p)}
+        >
+          <!-- Hero (avatar, square 180px) -->
+          <div class="pp-hero">
+            {#if p.avatar_path}
+              <img src={avatarUrl(p.avatar_path)} alt={p.name} class="pp-hero-img" />
+            {:else}
+              <div class="pp-hero-placeholder">
+                <GeneratedAvatar name={p.name} shape="square" block />
+              </div>
+            {/if}
+            <div class="pp-hero-overlay"></div>
+            <!-- Default/badge placeholder for future "type" tag -->
+            <span class="pp-hero-type">Persona</span>
+            <!-- Name overlaid on hero -->
+            <h3 class="pp-hero-name">{p.name}</h3>
+          </div>
+
+          <!-- Body -->
+          <div class="pp-body">
+            <p class="pp-desc">{p.description || t('personas.no_description', lang)}</p>
+            <div class="pp-footer">
+              <span class="pp-meta">
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                >
+                  <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"></path>
+                  <circle cx="12" cy="7" r="4"></circle>
+                </svg>
+                Persona
+              </span>
+              <div class="pp-actions">
+                <button
+                  class="pp-action-btn"
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    openEdit(p);
+                  }}
+                  aria-label={t('personas.edit_title_tooltip', lang)}
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"></path>
+                    <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+                  </svg>
+                </button>
+                <button
+                  class="pp-action-btn danger"
+                  onclick={(e) => {
+                    e.stopPropagation();
+                    confirmDelete(p.id, p.name);
+                  }}
+                  aria-label={t('personas.delete_title_tooltip', lang)}
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <polyline points="3 6 5 6 21 6"></polyline>
+                    <path
+                      d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"
+                    ></path>
+                  </svg>
+                </button>
               </div>
             </div>
-            <div class="pp-actions">
-              <button
-                class="pp-action-btn"
-                onclick={() => openEdit(p)}
-                title={t('personas.edit_title_tooltip', lang)}
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  ><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"></path><path
-                    d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"
-                  ></path></svg
-                >
-              </button>
-              <button
-                class="pp-action-btn danger"
-                onclick={() => confirmDelete(p.id)}
-                title={t('personas.delete_title_tooltip', lang)}
-              >
-                <svg
-                  width="14"
-                  height="14"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  ><polyline points="3 6 5 6 21 6"></polyline><path
-                    d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"
-                  ></path></svg
-                >
-              </button>
-            </div>
           </div>
-        </div>
+        </article>
       {/each}
     </div>
   {/if}
 </div>
 
-<!-- Modal -->
-{#if showModal}
-  <div class="pm-overlay" onclick={closeModal} role="presentation"></div>
-  <div class="pm-modal">
-    <div class="pm-header">
-      <h3 class="pm-title">
-        {editingId ? t('personas.edit_title', lang) : t('personas.new_title', lang)}
-      </h3>
-      <button class="pm-close" onclick={closeModal}>
-        <svg
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          ><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"
-          ></line></svg
-        >
-      </button>
-    </div>
-    <div class="pm-body">
-      <div class="pm-avatar-row">
-        <div class="pm-avatar-wrap">
-          {#if editAvatarPreview}
-            <img src={editAvatarPreview} alt="avatar" class="pm-avatar-img" />
+<!-- Modal: create / edit -->
+<Modal
+  bind:open={showModal}
+  size="md"
+  title={editingId ? t('personas.edit_title', lang) : t('personas.new_title', lang)}
+>
+  <div class="pp-avatar-row">
+    <div class="pp-avatar-wrap">
+      {#if editAvatarPreview}
+        <img src={editAvatarPreview} alt="avatar" class="pp-avatar-img" />
+      {:else}
+        <div class="pp-avatar-placeholder-modal">
+          {#if editName}
+            <GeneratedAvatar name={editName} shape="square" block />
           {:else}
-            <div class="pm-avatar-placeholder">
-              {(editName || '?')[0].toUpperCase()}
-            </div>
-          {/if}
-          {#if uploading}
-            <div class="pm-avatar-overlay">
-              <Loading size="sm" type="dots" />
-            </div>
+            <span>?</span>
           {/if}
         </div>
-        <label class="pm-upload-btn">
-          <svg
-            width="14"
-            height="14"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            ><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path><polyline
-              points="17 8 12 3 7 8"
-            ></polyline><line x1="12" y1="3" x2="12" y2="15"></line></svg
-          >
-          {t('personas.upload_avatar', lang)}
-          <input type="file" accept="image/*" class="hidden" onchange={handleAvatarUpload} />
-        </label>
-      </div>
-      <div class="pm-fields">
-        <div class="field-group">
-          <label class="field-label">{t('personas.name', lang)}</label>
-          <Input bind:value={editName} placeholder={t('personas.name_placeholder', lang)} />
+      {/if}
+      {#if uploading}
+        <div class="pp-avatar-overlay">
+          <Loading size="sm" type="dots" />
         </div>
-        <div class="field-group">
-          <label class="field-label">{t('personas.description', lang)}</label>
-          <Textarea
-            bind:value={editDesc}
-            rows={10}
-            placeholder={t('personas.description_placeholder', lang)}
-          />
-        </div>
-      </div>
+      {/if}
     </div>
-    <div class="pm-footer">
-      <button class="ray-btn" onclick={closeModal}>{t('personas.cancel', lang)}</button>
-      <button class="ray-btn primary" onclick={save}
-        >{editingId ? t('personas.save', lang) : t('personas.create', lang)}</button
+    <label class="pp-upload-btn">
+      <svg
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
       >
+        <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"></path>
+        <polyline points="17 8 12 3 7 8"></polyline>
+        <line x1="12" y1="3" x2="12" y2="15"></line>
+      </svg>
+      {t('personas.upload_avatar', lang)}
+      <input type="file" accept="image/*" class="hidden" onchange={handleAvatarUpload} />
+    </label>
+  </div>
+  <div class="pp-fields">
+    <div class="pp-field-group">
+      <label class="pp-field-label">{t('personas.name', lang)}</label>
+      <Input bind:value={editName} placeholder={t('personas.name_placeholder', lang)} />
+    </div>
+    <div class="pp-field-group">
+      <label class="pp-field-label">{t('personas.description', lang)}</label>
+      <Textarea
+        bind:value={editDesc}
+        rows={10}
+        placeholder={t('personas.description_placeholder', lang)}
+      />
     </div>
   </div>
-{/if}
 
-<!-- Delete confirm -->
-{#if deletingId !== null}
-  <div class="pm-overlay" onclick={cancelDelete} role="presentation"></div>
-  <div class="pm-modal pm-del-modal">
-    <div class="pm-del-icon">
+  {#snippet footer()}
+    <Button variant="outline" onclick={closeModal}>{t('personas.cancel', lang)}</Button>
+    <Button variant="primary" onclick={save}
+      >{editingId ? t('personas.save', lang) : t('personas.create', lang)}</Button
+    >
+  {/snippet}
+</Modal>
+
+<!-- Delete confirm: lighter-weight modal -->
+<Modal
+  bind:open={deleteDialogOpen}
+  size="sm"
+  title={t('personas.delete_title', lang)}
+>
+  <div class="pp-del-body">
+    <div class="pp-del-icon">
       <svg
         width="20"
         height="20"
@@ -318,51 +356,60 @@
         stroke-width="2"
         stroke-linecap="round"
         stroke-linejoin="round"
-        ><path
-          d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"
-        ></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"
-        ></line></svg
       >
+        <path
+          d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"
+        ></path>
+        <line x1="12" y1="9" x2="12" y2="13"></line>
+        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+      </svg>
     </div>
-    <p class="pm-del-msg">{t('personas.delete_confirm', lang)}</p>
-    <div class="pm-del-actions">
-      <button class="ray-btn" onclick={cancelDelete}>{t('personas.cancel', lang)}</button>
-      <button class="ray-btn danger" onclick={doDelete}>{t('common.delete', lang)}</button>
-    </div>
+    <p class="pp-del-msg">{t('personas.delete_confirm', lang)}</p>
+    {#if deletingName}
+      <p class="pp-del-name">«{deletingName}»</p>
+    {/if}
   </div>
-{/if}
+
+  {#snippet footer()}
+    <Button variant="outline" onclick={cancelDelete}>{t('personas.cancel', lang)}</Button>
+    <Button variant="error" onclick={doDelete}>{t('common.delete', lang)}</Button>
+  {/snippet}
+</Modal>
 
 <style>
+  /* ── Tokens: page-local aliases over the canonical --ray-* system.
+   * Self-contained: doesn't rely on .dark class for theming, uses
+   * prefers-color-scheme for light fallback. This avoids overriding
+   * --ray-* globally and keeps the page opt-in to future palette
+   * changes via app.css.                                              */
   :root {
     --pp-bg-card: #ffffff;
     --pp-border: rgba(0, 0, 0, 0.06);
     --pp-border-strong: rgba(0, 0, 0, 0.1);
+    --pp-border-subtle: rgba(0, 0, 0, 0.04);
     --pp-text: #1d1d1f;
     --pp-text-secondary: #6e6e73;
     --pp-text-tertiary: #86868b;
-    --pp-hover: rgba(0, 0, 0, 0.04);
+    --pp-hover: rgba(0, 0, 0, 0.03);
     --pp-red: #ff3b30;
-    --pp-blue: hsl(211, 100%, 50%);
     --pp-shadow-ring: rgba(0, 0, 0, 0.04);
     --pp-shadow-inset: rgba(0, 0, 0, 0.02);
-    --pp-overlay: #ffffff;
-    --pp-bg: #f5f5f7;
   }
   :root.dark {
     --pp-bg-card: #101111;
     --pp-border: rgba(255, 255, 255, 0.06);
     --pp-border-strong: rgba(255, 255, 255, 0.1);
+    --pp-border-subtle: rgba(255, 255, 255, 0.04);
     --pp-text: #f9f9f9;
     --pp-text-secondary: #9c9c9d;
     --pp-text-tertiary: #6a6b6c;
-    --pp-hover: rgba(255, 255, 255, 0.04);
+    --pp-hover: rgba(255, 255, 255, 0.03);
     --pp-red: #ff6363;
-    --pp-blue: hsl(202, 100%, 67%);
     --pp-shadow-ring: rgb(27, 28, 30);
     --pp-shadow-inset: rgb(7, 8, 10);
-    --pp-overlay: #1b1c1e;
-    --pp-bg: #07080a;
   }
+
+  /* ── Page chrome ───────────────────────────────────────────── */
   .pp-page {
     padding: 32px 48px;
     color: var(--pp-text);
@@ -391,6 +438,8 @@
     color: var(--pp-text-secondary);
     margin: 4px 0 0;
   }
+
+  /* ── Empty state ───────────────────────────────────────────── */
   .pp-empty {
     display: flex;
     flex-direction: column;
@@ -421,68 +470,125 @@
     color: var(--pp-text-tertiary);
     font-family: 'Maple Mono', sans-serif;
   }
+
+  /* ── Card grid ─────────────────────────────────────────────── */
   .pp-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-    gap: 10px;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
   }
+
+  /* ── Card (BotCard-style: hero, body, footer) ──────────────── */
   .pp-card {
     background: var(--pp-bg-card);
     border: 1px solid var(--pp-border);
-    border-radius: 12px;
-    padding: 16px;
+    border-radius: 14px;
+    overflow: hidden;
     box-shadow:
       var(--pp-shadow-ring) 0px 0px 0px 1px,
       var(--pp-shadow-inset) 0px 0px 0px 1px inset;
-    transition: all 0.15s ease;
+    transition: all 0.2s ease;
+    display: flex;
+    flex-direction: column;
+  }
+  /* Click-to-edit affordance — same cursor:focus pattern as BotCard.
+     Focus ring matches the canonical --ray-blue focus indicator.   */
+  .pp-card.pp-clickable {
+    cursor: pointer;
+    outline: none;
+  }
+  .pp-card.pp-clickable:focus-visible {
+    border-color: var(--pp-border-strong);
+    box-shadow:
+      var(--pp-shadow-ring) 0px 0px 0px 1px,
+      var(--pp-shadow-inset) 0px 0px 0px 1px inset,
+      0 0 0 3px color-mix(in srgb, hsl(202, 100%, 67%) 8%, transparent);
   }
   .pp-card:hover {
     border-color: var(--pp-border-strong);
+    box-shadow:
+      var(--pp-shadow-ring) 0px 0px 0px 1px,
+      var(--pp-shadow-inset) 0px 0px 0px 1px inset,
+      0 8px 24px color-mix(in srgb, #000 8%, transparent);
+    transform: translateY(-1px);
   }
-  .pp-card-top {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 12px;
+
+  /* Hero — square, 180px tall, accommodates big avatars like BotCard */
+  .pp-hero {
+    position: relative;
+    width: 100%;
+    height: 180px;
+    background: color-mix(in srgb, var(--pp-text) 3%, transparent);
   }
-  .pp-card-info {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    min-width: 0;
-    flex: 1;
-  }
-  .pp-avatar {
-    width: 48px;
-    height: 48px;
-    border-radius: 10px;
+  .pp-hero-img {
+    width: 100%;
+    height: 100%;
     object-fit: cover;
-    flex-shrink: 0;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    transition: transform 0.3s ease;
   }
-  .pp-avatar-placeholder {
-    width: 48px;
-    height: 48px;
-    border-radius: 10px;
+  .pp-card:hover .pp-hero-img {
+    transform: scale(1.03);
+  }
+  .pp-hero-placeholder {
+    width: 100%;
+    height: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 20px;
-    font-weight: 700;
-    color: #fff;
-    flex-shrink: 0;
-    background: linear-gradient(135deg, #8b5cf6, #06b6d4);
   }
-  .pp-name {
+  /* Soft bottom-up fade so the overlaid name is always legible
+     regardless of avatar brightness (matches BotCard). */
+  .pp-hero-overlay {
+    position: absolute;
+    bottom: -10px;
+    left: 0;
+    right: 0;
+    height: 60%;
+    background: linear-gradient(to top, var(--pp-bg-card) 20%, transparent);
+    pointer-events: none;
+  }
+  /* "Persona" tag in the upper-right corner — uses the same
+     glass-pill style as BotCard's bc-hero-type, anchored to the
+     design system. Future "type" variants (Owner / Starred /
+     Custom) can reuse this slot. */
+  .pp-hero-type {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    font-family: 'Maple Mono', sans-serif;
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 86px;
+    background: color-mix(in srgb, var(--pp-bg-card) 75%, transparent);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    letter-spacing: 0.3px;
+    color: var(--pp-text-secondary);
+  }
+  .pp-hero-name {
+    position: absolute;
+    bottom: 10px;
+    left: 12px;
+    right: 12px;
     font-family: 'Maple Mono', sans-serif;
     font-size: 15px;
     font-weight: 600;
     color: var(--pp-text);
-    letter-spacing: 0.2px;
-    margin: 0 0 2px;
+    margin: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  /* Body — description + footer (matches BotCard internal padding) */
+  .pp-body {
+    padding: 12px 14px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
   }
   .pp-desc {
     font-family: 'Maple Mono', sans-serif;
@@ -490,11 +596,31 @@
     font-weight: 400;
     color: var(--pp-text-secondary);
     letter-spacing: 0.15px;
+    line-height: 1.5;
     margin: 0;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
+    flex: 1;
+  }
+  .pp-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-top: 8px;
+    border-top: 1px solid var(--pp-border-subtle);
+    gap: 8px;
+  }
+  .pp-meta {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-family: 'Maple Mono', sans-serif;
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--pp-text-tertiary);
+    letter-spacing: 0.2px;
   }
   .pp-actions {
     display: flex;
@@ -505,14 +631,14 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
+    width: 26px;
+    height: 26px;
     border: none;
     border-radius: 6px;
     background: transparent;
     color: var(--pp-text-secondary);
     cursor: pointer;
-    transition: all 0.12s ease;
+    transition: all 0.1s ease;
   }
   .pp-action-btn:hover {
     background: var(--pp-hover);
@@ -523,113 +649,51 @@
     color: var(--pp-red);
   }
 
-  /* ─── Modal ─── */
-  .pm-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.45);
-    backdrop-filter: blur(4px);
-    z-index: 98;
-  }
-  .pm-modal {
-    position: fixed;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    background: var(--pp-overlay);
-    border: 1px solid var(--pp-border);
-    border-radius: 14px;
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
-    z-index: 99;
-    width: 440px;
-    max-width: 90vw;
-    max-height: 85vh;
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-  }
-  .pm-del-modal {
-    width: 360px;
-    padding: 24px;
-    gap: 16px;
-    align-items: center;
-    text-align: center;
-  }
-  .pm-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 16px 20px 0;
-  }
-  .pm-title {
-    font-family: 'Maple Mono', sans-serif;
-    font-size: 17px;
-    font-weight: 600;
-    color: var(--pp-text);
-    margin: 0;
-    letter-spacing: 0.2px;
-  }
-  .pm-close {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    border: none;
-    border-radius: 6px;
-    background: transparent;
-    color: var(--pp-text-secondary);
-    cursor: pointer;
-    transition: all 0.12s ease;
-  }
-  .pm-close:hover {
-    background: var(--pp-hover);
-    color: var(--pp-text);
-  }
-  .pm-body {
-    padding: 16px 20px 20px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-  .pm-avatar-row {
+  /* ── Modal internals (avatar row, fields) ──────────────────── */
+  .pp-avatar-row {
     display: flex;
     align-items: center;
     gap: 12px;
+    margin-bottom: 16px;
   }
-  .pm-avatar-wrap {
+  .pp-avatar-wrap {
     position: relative;
     flex-shrink: 0;
   }
-  .pm-avatar-img {
+  .pp-avatar-img {
     width: 64px;
     height: 64px;
     border-radius: 12px;
     object-fit: cover;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
   }
-  .pm-avatar-placeholder {
+  /* Square GeneratedAvatar block inside modal — matches the modal
+     64x64 frame so the user sees the same generated face as the
+     card hero. */
+  .pp-avatar-placeholder-modal {
     width: 64px;
     height: 64px;
     border-radius: 12px;
+    overflow: hidden;
     display: flex;
     align-items: center;
     justify-content: center;
+    font-family: 'Maple Mono', sans-serif;
     font-size: 24px;
     font-weight: 700;
-    color: #fff;
-    background: linear-gradient(135deg, #8b5cf6, #06b6d4);
+    color: var(--pp-text-tertiary);
+    background: color-mix(in srgb, var(--pp-text) 5%, transparent);
   }
-  .pm-avatar-overlay {
+  .pp-avatar-overlay {
     position: absolute;
     inset: 0;
     border-radius: 12px;
-    background: color-mix(in srgb, var(--pp-overlay) 70%, transparent);
+    background: color-mix(in srgb, var(--pp-bg-card) 70%, transparent);
     display: flex;
     align-items: center;
     justify-content: center;
   }
-  .pm-upload-btn {
+  .pp-upload-btn {
     display: inline-flex;
     align-items: center;
     gap: 4px;
@@ -644,34 +708,38 @@
     cursor: pointer;
     transition: all 0.12s ease;
   }
-  .pm-upload-btn:hover {
+  .pp-upload-btn:hover {
     border-color: var(--pp-border-strong);
     color: var(--pp-text);
   }
-  .pm-fields {
+  .pp-fields {
     display: flex;
     flex-direction: column;
     gap: 12px;
   }
-  .field-group {
+  .pp-field-group {
     display: flex;
     flex-direction: column;
     gap: 6px;
   }
-  .field-label {
+  .pp-field-label {
     font-family: 'Maple Mono', sans-serif;
     font-size: 13px;
     font-weight: 500;
     color: var(--pp-text-secondary);
     letter-spacing: 0.2px;
   }
-  .pm-footer {
+
+  /* ── Delete confirm (Modal size=sm) ────────────────────────── */
+  .pp-del-body {
     display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    padding: 0 20px 16px;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 12px;
+    padding: 4px 0;
   }
-  .pm-del-icon {
+  .pp-del-icon {
     width: 40px;
     height: 40px;
     border-radius: 10px;
@@ -681,46 +749,20 @@
     justify-content: center;
     color: var(--pp-red);
   }
-  .pm-del-msg {
+  .pp-del-msg {
     font-family: 'Maple Mono', sans-serif;
     font-size: 14px;
     color: var(--pp-text-secondary);
     margin: 0;
     line-height: 1.5;
+    max-width: 320px;
   }
-  .pm-del-actions {
-    display: flex;
-    gap: 8px;
-    width: 100%;
-  }
-  .pm-del-actions .ray-btn {
-    flex: 1;
-    justify-content: center;
-  }
-
-  /* ─── Input/Textarea override ─── */
-  :global(.pp-page .input),
-  :global(.pp-page .textarea) {
-    background: var(--pp-bg) !important;
-    border: 1px solid var(--pp-border) !important;
-    border-radius: 8px !important;
-    color: var(--pp-text) !important;
-    font-family: 'Maple Mono', sans-serif !important;
-    font-size: 13px !important;
-    padding: 10px 14px !important;
-    letter-spacing: 0.2px;
-    box-shadow: none !important;
-    transition: border-color 0.15s ease !important;
-  }
-  :global(.pp-page .input:focus),
-  :global(.pp-page .textarea:focus) {
-    border-color: var(--pp-blue) !important;
-    outline: none !important;
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--pp-blue) 8%, transparent) !important;
-  }
-  :global(.pp-page .input::placeholder),
-  :global(.pp-page .textarea::placeholder) {
-    color: var(--pp-text-tertiary) !important;
+  .pp-del-name {
+    font-family: 'Maple Mono', sans-serif;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--pp-text);
+    margin: 0;
   }
 
   @media (max-width: 768px) {
