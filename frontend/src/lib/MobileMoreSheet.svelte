@@ -15,6 +15,7 @@
 -->
 <script lang="ts">
   import { onDestroy, onMount, tick } from 'svelte';
+  import { applyThemePreference } from './theme';
 
   interface Props {
     onclose: () => void;
@@ -38,12 +39,9 @@
     onclose();
   }
 
-  function setTheme(pref: 'dark' | 'light' | 'system') {
-    // Lazy import to avoid SSR/test bundle cycles
-    import('./theme').then((m) => {
-      m.applyThemePreference(pref);
-      onclose();
-    });
+  function setTheme(pref: 'light' | 'dark' | 'system') {
+    applyThemePreference(pref);
+    onclose();
   }
 
   onMount(() => {
