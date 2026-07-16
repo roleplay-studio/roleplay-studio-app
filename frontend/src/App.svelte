@@ -6,6 +6,8 @@
   import BackendErrorScreen from './lib/BackendErrorScreen.svelte';
   import GlobalDropZone from './lib/GlobalDropZone.svelte';
   import { currentLang, t } from './lib/i18n';
+  import MobileBottomNav from './lib/MobileBottomNav.svelte';
+  import MobileMoreSheet from './lib/MobileMoreSheet.svelte';
   import BotCreatePage from './lib/pages/BotCreatePage.svelte';
   import BotEditPage from './lib/pages/BotEditPage.svelte';
   import BotPreviewPage from './lib/pages/BotPreviewPage.svelte';
@@ -38,6 +40,21 @@
   // the backend finishes starting.
   let splashLang = $state('en');
   let unsubLang: (() => void) | undefined;
+  // MobileMoreSheet visibility — toggled by MobileBottomNav's "More" slot.
+  let moreSheetOpen = $state(false);
+
+  /**
+   * Viewport tier:
+   *   - 'phone'  (< 768px)  — Sidebar hidden, MobileBottomNav visible
+   *   - 'tablet' (768-1023) — Sidebar visible (collapsed icon-only via CSS),
+   *                          no bottom-nav
+   *   - 'desktop' (>= 1024) — Sidebar visible (full, user-toggleable)
+   *
+   * isMobile from sidebar.ts store means "< 1024px" — we keep that
+   * for legacy reasons but introduce the finer-grained tier here.
+   * isPhone is what gates bottom-nav visibility.
+   */
+  let viewportTier = $state<'desktop' | 'phone' | 'tablet'>('desktop');
 
   function parseHash() {
     const hash = window.location.hash.slice(1) || '/';
@@ -89,8 +106,11 @@
   }
 
   function handleResize() {
-    const mobile = window.innerWidth < 1024;
+    const w = window.innerWidth;
+    const mobile = w < 1024;
+    const phone = w < 768;
     isMobile.set(mobile);
+    viewportTier = phone ? 'phone' : mobile ? 'tablet' : 'desktop';
     if (mobile) {
       sidebarOpen.set(false);
     } else {
@@ -298,34 +318,22 @@
 {:else if needsSetup}
   <SetupWizard />
 {:else}
-  <div class="flex min-h-screen h-screen bg-theme text-theme">
-    {#if $sidebarOpen && $isMobile}
-      <!-- Mobile backdrop -->
+  <div class="app-shell" data-tier={viewportTier}>
+    {#if $sidebarOpen && $isMobile && viewportTier === 'tablet'}
+      <!-- Tablet backdrop (only when sidebar is open on tablet — phone
+           doesn't have a sidebar at all, so no backdrop needed) -->
       <div
         class="fixed inset-0 z-30 bg-black/40 backdrop-blur-sm transition-opacity"
         onclick={() => sidebarOpen.set(false)}
       ></div>
     {/if}
 
-    <Sidebar {currentRoute} />
+    {#if viewportTier !== 'phone'}
+      <Sidebar {currentRoute} />
+    {/if}
 
-    <main
-      class="flex-1 w-full overflow-y-auto transition-all duration-300 ml-15 min-h-0"
-      class:md:ml-[220px]={$sidebarOpen}
-    >
+    <main class="app-main" class:sidebar-open={$sidebarOpen && viewportTier === 'desktop'}>
       <div class="w-full relative">
-        <!-- {#if !$sidebarOpen}
-          <button
-            onclick={() => sidebarOpen.set(true)}
-            class="absolute top-7 left-0 z-10 w-8 h-8 flex items-center justify-center rounded-lg bg-theme-surface/80 backdrop-blur-lg border border-theme text-theme-secondary hover:text-theme shadow-sm transition-all hover:bg-theme-surface"
-            aria-label="Open sidebar"
-          >
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" class="size-5">
-                <path fill-rule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd" />
-              </svg>
-
-          </button>
-        {/if} -->
         {#if baseRoute === '/connect'}
           <ConnectToServer />
         {:else if baseRoute === '/' && routePath === '/'}
@@ -355,6 +363,11 @@
         {/if}
       </div>
     </main>
+
+    {#if viewportTier === 'phone'}
+      <MobileBottomNav {currentRoute} onMoreClick={() => (moreSheetOpen = true)} />
+      <MobileMoreSheet open={moreSheetOpen} onclose={() => (moreSheetOpen = false)} />
+    {/if}
   </div>
   <GlobalDropZone />
 {/if}
@@ -363,4 +376,58 @@
   /* Splash-specific styles live in SplashScreen.svelte. App.svelte
      used to draw its own inline spinner here; now that the splash
      is a real component it owns the animation and a11y attributes. */
+
+  /* ── App shell — Phase 1.5 / 1.6 (MOBILE_PLAN.md) ──────────── */
+  /*
+    Previously the shell used `class="flex min-h-screen h-screen ..."`
+    and the <main> used `class:md:ml-[220px]={$sidebarOpen}`. That
+    broke mobile: the Sidebar was always in the DOM at full width
+    and the main content was squeezed into ~200px on a 390 viewport.
+
+    New model:
+      - phone  (<768): full-width main, bottom-nav reserved space
+      - tablet (768-1023): main has 220px (sidebar open) or 60px (closed) on left
+      - desktop (>=1024): same as tablet but user-toggleable
+  */
+  .app-shell {
+    display: flex;
+    min-height: 100vh;
+    height: 100vh;
+    background: var(--ray-bg);
+    color: var(--ray-text);
+    overflow: hidden;
+  }
+
+  .app-main {
+    flex: 1 1 0;
+    width: 100%;
+    overflow-y: auto;
+    min-height: 0;
+    /* Default: 0 left margin (phone), then 60px (sidebar collapsed on tablet/desktop) */
+    margin-left: 0;
+    transition: margin-left 0.25s ease;
+    /* Reserve bottom-nav height on phone so content doesn't go under it.
+       MobileBottomNav height = 56px + safe-area-inset-bottom. */
+    padding-bottom: 0;
+  }
+
+  /* Tablet+ (>=768): main shifts right to accommodate Sidebar */
+  @media (min-width: 768px) {
+    .app-main {
+      margin-left: 60px;
+    }
+    /* When sidebar is open AND desktop (>=1024), push main further */
+    @media (min-width: 1024px) {
+      .app-main.sidebar-open {
+        margin-left: 220px;
+      }
+    }
+  }
+
+  /* Phone (<768): reserve bottom-nav space */
+  @media (max-width: 767.98px) {
+    .app-main {
+      padding-bottom: calc(56px + var(--safe-bottom, 0px));
+    }
+  }
 </style>
