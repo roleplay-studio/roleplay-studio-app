@@ -49,8 +49,8 @@ describe('MobileMoreSheet', () => {
     const { container } = render(MobileMoreSheet, {
       props: { onclose: () => {}, open: true },
     });
-    expect(container.querySelector('.mms-root')).toBeTruthy();
-    expect(container.querySelector('.mms-backdrop')).toBeTruthy();
+    expect(container.querySelector('.bs-root')).toBeTruthy();
+    expect(container.querySelector('.bs-backdrop')).toBeTruthy();
     expect(container.querySelector('.mms-nav')).toBeTruthy();
   });
 
@@ -68,7 +68,7 @@ describe('MobileMoreSheet', () => {
     const { container } = render(MobileMoreSheet, {
       props: { onclose, open: true },
     });
-    const backdrop = container.querySelector('.mms-backdrop') as HTMLElement;
+    const backdrop = container.querySelector('.bs-backdrop') as HTMLElement;
     expect(backdrop).toBeTruthy();
     await fireEvent.click(backdrop);
     expect(onclose).toHaveBeenCalledTimes(1);
