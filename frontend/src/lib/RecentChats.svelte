@@ -107,7 +107,29 @@
 
   onMount(() => {
     currentLang.subscribe((v) => (lang = v));
-    collapsedBots = loadCollapsedFromStorage();
+    const stored = loadCollapsedFromStorage();
+    // On phone (<768px) we collapse all groups by default — saves vertical
+    // space on a tall-but-narrow viewport where the user can tap to
+    // expand the group they want. On tablet+ we expand everything
+    // because there's room for a 5-bot wall of recent chats.
+    // localStorage still wins if the user explicitly toggled something.
+    const isPhone = typeof window !== 'undefined' && window.innerWidth < 768;
+    if (isPhone && stored.size === 0) {
+      // Collapse every bot_id so only the most-recent group (rendered first)
+      // shows its threads; user taps a group to expand.
+      // Note: we deliberately use a plain Set here (not SvelteSet) for
+      // the same reason as `collapsedBots` above — SvelteSet's mutation
+      // events don't propagate to template bindings in our Svelte version,
+      // and `collapsedBots = all` reassignment below is what triggers
+      // re-render. See line ~46 for the full rationale.
+      // eslint-disable-next-line svelte/prefer-svelte-reactivity
+      const all = new Set<number>();
+      for (const t of threads) all.add(t.bot_id);
+      collapsedBots = all;
+      persistCollapsedBots(all);
+    } else {
+      collapsedBots = stored;
+    }
   });
 
   let deletingId: null | number = $state(null);
@@ -172,8 +194,14 @@
         <Select
           bind:value={sortMode}
           options={[
-            { label: t(THREAD_SORT_MODE_KEYS['by-last-activity'], lang), value: 'by-last-activity' },
-            { label: t(THREAD_SORT_MODE_KEYS['by-message-count'], lang), value: 'by-message-count' },
+            {
+              label: t(THREAD_SORT_MODE_KEYS['by-last-activity'], lang),
+              value: 'by-last-activity',
+            },
+            {
+              label: t(THREAD_SORT_MODE_KEYS['by-message-count'], lang),
+              value: 'by-message-count',
+            },
             { label: t(THREAD_SORT_MODE_KEYS['by-name'], lang), value: 'by-name' },
           ]}
         />
@@ -220,7 +248,10 @@
                   </div>
 
                   <div class="rc-bottom">
-                    <p class="rc-preview" class:rc-summary={!!thread.summary && !thread.last_message_short_content}>
+                    <p
+                      class="rc-preview"
+                      class:rc-summary={!!thread.summary && !thread.last_message_short_content}
+                    >
                       {#if thread.last_message_short_content}
                         {truncate(thread.last_message_short_content, 100)}
                       {:else if thread.summary}
