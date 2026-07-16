@@ -44,7 +44,7 @@ function resolveBaselineDir() {
   // Fallback: relative to script location (frontend/scripts/ → frontend/)
   return resolve(__dirname, '..', 'e2e/baseline');
 }
-const BASELINE_DIR = resolveBaselineDir();
+const BASELINE_DIR = process.env.OUT_DIR ?? resolveBaselineDir();
 
 const BASE_URL = process.env.BASELINE_URL ?? 'http://127.0.0.1:1420';
 
