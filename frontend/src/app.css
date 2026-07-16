@@ -314,6 +314,37 @@
   --theme-border: var(--ray-border);
 }
 
+/* ── Breakpoints (Phase 1.2 — MOBILE_PLAN.md) ───── */
+/*
+  Single source of truth for responsive thresholds.
+  Values match what Tailwind v4 uses by default so
+  `sm:`/`md:`/`lg:` utilities in @apply blocks align
+  with these CSS custom properties.
+
+  Use via @media (min-width: var(--bp-md)) in <style>
+  blocks; use `md:` / `lg:` utilities in @apply chains.
+*/
+:root {
+  --bp-xs: 480px; /* Phone */
+  --bp-sm: 768px; /* Tablet portrait */
+  --bp-md: 1024px; /* Desktop / Tauri */
+  --bp-lg: 1280px; /* Wide desktop */
+}
+
+/* ── iOS safe-area insets ──────────────────────── */
+/*
+  Phase 1.5: bottom-nav and chat-input use these to
+  leave room for the iOS home indicator / Android
+  gesture bar. viewport-fit=cover in index.html is
+  required for the values to be non-zero.
+*/
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
 /* ── Raycast utility classes ──────────────────────── */
 /* Use instead of duplicating .ray-btn and .ray-card on every page */
 
