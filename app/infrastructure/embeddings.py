@@ -7,6 +7,7 @@ that some providers (e.g. LM Studio with bge-m3) don't handle.
 
 import httpx
 
+from app.domain.constants import EMBEDDING_REQUEST_TIMEOUT_SECONDS
 from app.infrastructure.config import Settings
 
 
@@ -18,7 +19,7 @@ class HttpEmbeddings:
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._client = httpx.Client(timeout=30.0)
+        self._client = httpx.Client(timeout=EMBEDDING_REQUEST_TIMEOUT_SECONDS)
 
     @property
     def model(self) -> str | None:

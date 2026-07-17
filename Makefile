@@ -508,6 +508,14 @@ docker-test-shell: ## Drop into a shell in the test compose (debug fixtures inte
 docker-ruff: ## Run ruff check inside the backend container
 	$(COMPOSE_TEST) run --rm backend ruff check .
 
+.PHONY: docker-ruff-fix
+docker-ruff-fix: ## Run ruff check --fix inside the backend container (auto-fix safe issues)
+	$(COMPOSE_TEST) run --rm backend ruff check --fix .
+
+.PHONY: docker-ruff-format
+docker-ruff-format: ## Run ruff format inside the backend container
+	$(COMPOSE_TEST) run --rm backend ruff format .
+
 .PHONY: docker-frontend-lint
 docker-frontend-lint: ## Run frontend eslint inside its container (dev stack)
 	$(COMPOSE) exec frontend npm run lint
