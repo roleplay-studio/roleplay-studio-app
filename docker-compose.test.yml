@@ -24,6 +24,16 @@
 
 services:
   backend:
+    # Match the base compose's image name so the test override can
+    # be used STANDALONE (without the base file) — without an image
+    # reference, ``docker compose -f docker-compose.test.yml`` fails
+    # with "service backend has neither an image nor a build context".
+    # The base compose already declares this image; restating it here
+    # is a no-op when both files are merged.
+    image: roleplay-studio-backend:dev
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
     # Override the dev command so compose `run` defaults to a
     # shell rather than blocking the terminal with the API.
     #
@@ -80,3 +90,62 @@ services:
 
   # Frontend is omitted: pytest only needs the backend, and
   # starting Vite just to run backend tests would slow CI down.
+
+  frontend:
+    # Test-override for the frontend service. We intentionally don't
+    # inherit from docker-compose.yml's frontend block — the dev
+    # compose pulls in ``depends_on: backend (healthy)`` and the dev
+    # command (vite dev server). For lint/vitest runs we want a
+    # stand-alone container that:
+    #
+    #   * uses the same pre-built image (``roleplay-studio-frontend:dev``)
+    #     so we don't rebuild from scratch on every test run;
+    #   * has NO dependency on the backend (lint/vitest don't touch /api);
+    #   * bind-mounts the frontend source read-write — some vitest
+    #     suites write tmp fixtures alongside the test module;
+    #   * keeps ``node_modules`` in an anonymous volume (container-built
+    #     deps stay isolated from the host's macOS-built node_modules).
+    #
+    # compose ``run --rm frontend npm run lint`` then becomes the
+    # canonical way to lint without needing the dev stack up. The
+    # previous Makefile recipe (``exec frontend npm run lint``) required
+    # the dev stack to be running on the host, which conflicts with
+    # the operator's own ``make dev-frontend`` on :1420.
+    image: roleplay-studio-frontend:dev
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    # Override the dev command so compose `run` defaults to a
+    # shell rather than blocking the terminal with the dev server.
+    # ``npm run dev`` would attach to port 1420 and never exit; for
+    # lint/vitest we want ``npm run lint`` / ``npm run test`` to
+    # fire once and return with the tool's exit code.
+    command: ["sleep", "infinity"]
+    working_dir: /app/frontend
+    # No entrypoint shim — there's no dev-mode env-var scrub needed
+    # for the frontend (DEBUG/ENVIRONMENT/LOG_LEVEL are backend-only,
+    # and apiBase() reads localStorage at runtime, not env vars).
+    volumes:
+      # Source mounts — read-WRITE here because some vitest suites
+      # (e.g. ``catalog.test.ts`` snapshot files) write back to
+      # ``frontend/src``. The host source remains the source of truth
+      # — vitest writes only inside the project's own ``__tests__``
+      # directories which are already git-tracked / git-ignored as
+      # appropriate.
+      - ./frontend/src:/app/frontend/src:rw
+      - ./frontend/public:/app/frontend/public:rw
+      - ./frontend/index.html:/app/frontend/index.html:rw
+      - ./frontend/vite.config.ts:/app/frontend/vite.config.ts:rw
+      - ./frontend/tsconfig.json:/app/frontend/tsconfig.json:rw
+      - ./frontend/svelte.config.js:/app/frontend/svelte.config.js:rw
+      - ./frontend/package.json:/app/frontend/package.json:rw
+      - ./frontend/eslint.config.js:/app/frontend/eslint.config.js:rw
+      - ./frontend/vitest.setup.ts:/app/frontend/vitest.setup.ts:rw
+      # node_modules from the container — the host's was built against
+      # host glibc / node and won't load inside the slim Debian image.
+      # Anonymous volume keeps the container's node_modules separate
+      # from the bind-mount and survives across successive ``run --rm``
+      # invocations (warm cache benefit).
+      - /app/frontend/node_modules
+    # No ports, no network dependency on backend. ESLint + vitest
+    # are in-process and don't touch /api.

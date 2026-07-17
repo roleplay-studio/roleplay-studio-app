@@ -1,4 +1,4 @@
-"""Tests for `python -m app.print_qr` CLI."""
+"""Tests for `python -m scripts.print_qr` CLI."""
 
 import os
 import subprocess
@@ -22,7 +22,7 @@ def test_print_qr_generates_png_file():
             [
                 _PYTHON,
                 "-m",
-                "app.print_qr",
+                "scripts.print_qr",
                 "--url",
                 "https://test.example.com",
                 "--out",
@@ -44,7 +44,7 @@ def test_print_qr_uses_env_url_when_not_specified(tmp_path, monkeypatch):
     monkeypatch.setenv("PUBLIC_URL", "https://env.example.com")
     out_path = tmp_path / "qr.png"
     result = subprocess.run(
-        [_PYTHON, "-m", "app.print_qr", "--out", str(out_path)],
+        [_PYTHON, "-m", "scripts.print_qr", "--out", str(out_path)],
         capture_output=True,
         text=True,
         timeout=30,

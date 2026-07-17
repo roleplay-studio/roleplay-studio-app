@@ -1,4 +1,13 @@
-"""RAG system — retrieves context from a knowledge base and augments LLM calls."""
+"""RAG system — retrieves context from a knowledge base and augments LLM calls.
+
+Note: RAGSystem is currently a scaffold; ``generate_with_rag`` is not
+yet wired into the chat pipeline. The ``llm`` parameter is typed as
+``OpenRouterLLM`` for now because that's the only LLM class that
+exposes a synchronous ``generate_response(messages) -> str`` method.
+When the chat path starts using RAG we'll switch to ``BaseOpenAICompatibleLLM``
+(the provider-agnostic base class) and add an async-friendly path that
+aligns with ``LLMPort.generate_response``.
+"""
 
 from typing import Any
 

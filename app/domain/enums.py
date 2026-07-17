@@ -12,20 +12,12 @@ class BotType(StrEnum):
     ASSISTANT = "assistant"
     AGENT = "agent"
 
-    @property
-    def label(self) -> str:
-        labels = {
-            BotType.RP: "🎭 RolePlay",
-            BotType.ASSISTANT: "🤖 Assistant",
-            BotType.AGENT: "🛠️ Agent",
-        }
-        return labels[self]
-
-    @property
-    def description(self) -> str:
-        descs = {
-            BotType.RP: "Character with personality, scenario, first message",
-            BotType.ASSISTANT: "Helpful AI with system prompt",
-            BotType.AGENT: "AI agent with file upload & tools",
-        }
-        return descs[self]
+    # Note: ``label`` / ``description`` properties were removed in
+    # response to code review #2 (CSV export from a previous tool).
+    # The frontend renders BotType labels and descriptions from its
+    # own ``BOT_TYPES`` constant in src/lib/api.ts, which keeps the
+    # copy under i18n control without round-tripping through the
+    # backend. If you need server-side label rendering in the
+    # future, add an i18n-aware formatter in
+    # ``app.application.formatters`` rather than re-introducing
+    # English-only labels here.

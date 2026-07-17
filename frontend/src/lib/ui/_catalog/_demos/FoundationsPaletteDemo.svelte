@@ -1,4 +1,11 @@
-<!-- FoundationsPaletteDemo.svelte — surface/neko/roleplay-studio color swatches -->
+<!-- FoundationsPaletteDemo.svelte — surface/neko color swatches.
+
+     Note: the ``roleplay-studio-`` swatches were removed when
+     the underlying palette variables were deleted from app.css
+     (they were only consumed by FlyonUI semantic-token overrides,
+     which now inline the same OKLCH values directly). Surface
+     and neko are the only Tailwind @theme palettes still in
+     use across the app. -->
 <script lang="ts">
   const SWATCHES: { name: string; var: string }[] = [
     { name: 'surface-50', var: '--color-surface-50' },
@@ -9,8 +16,6 @@
     { name: 'surface-900', var: '--color-surface-900' },
     { name: 'neko-300', var: '--color-neko-300' },
     { name: 'neko-500', var: '--color-neko-500' },
-    { name: 'roleplay-studio-500', var: '--color-roleplay-studio-500' },
-    { name: 'roleplay-studio-700', var: '--color-roleplay-studio-700' },
   ];
 </script>
 

@@ -18,69 +18,95 @@
 /* Safelist для динамических иконок Tabler */
 @source './lib/ui/icons-safelist.ts';
 
-/* ── Theme: кастомные цвета из tailwind.config.js ──── */
-@theme {
-  --color-surface-50: var(--theme-surface-50, #f8f7ff);
-  --color-surface-100: var(--theme-surface-100, #eeeaff);
-  --color-surface-200: var(--theme-surface-200, #ddd5ff);
-  --color-surface-300: var(--theme-surface-300, #c4b5ff);
-  --color-surface-400: var(--theme-surface-400, #a78bfa);
-  --color-surface-500: var(--theme-surface-500, #8b5cf6);
-  --color-surface-600: var(--theme-surface-600, #7c3aed);
-  --color-surface-700: var(--theme-surface-700, #6d28d9);
-  --color-surface-800: var(--theme-surface-800, #5b21b6);
-  --color-surface-900: var(--theme-surface-900, #4c1d95);
-  --color-surface-950: var(--theme-surface-950, #2e1065);
+/* ── Theme: Tailwind utility colors (rp- prefix) ─────── */
+/*  Pattern: --color-rp-X is a Tailwind utility ("bg-rp-text",
+    "border-rp-border-card"). Each one resolves to a CSS variable
+    (--ray-X) defined in the ":root" / ".dark" blocks further down.
+    The @theme inline {} form tells Tailwind to keep the value
+    dynamic (read at runtime) instead of baking it in at build
+    time — so toggling ".dark" on <html> re-flipps every
+    "bg-rp-*" / "text-rp-*" without rebuilding.                  */
+@theme inline {
+  /* surface (bg-rp-bg, bg-rp-surface, bg-rp-surface-raised,
+     bg-rp-overlay) — backgrounds and panels */
+  --color-rp-bg: var(--ray-bg);
+  --color-rp-surface: var(--ray-surface);
+  --color-rp-surface-raised: var(--ray-surface-raised);
+  --color-rp-overlay: var(--ray-overlay);
 
+  /* text (text-rp-text, text-rp-text-secondary,
+     text-rp-text-tertiary) — three levels per design system */
+  --color-rp-text: var(--ray-text);
+  --color-rp-text-secondary: var(--ray-text-secondary);
+  --color-rp-text-tertiary: var(--ray-text-tertiary);
+
+  /* border (border-rp-border, border-rp-border-strong,
+     border-rp-border-card, border-rp-border-subtle) */
+  --color-rp-border: var(--ray-border);
+  --color-rp-border-strong: var(--ray-border-strong);
+  --color-rp-border-card: var(--ray-border-card);
+  --color-rp-border-subtle: var(--ray-border-subtle);
+
+  /* accent + semantic (text-rp-accent, text-rp-blue, …) */
+  --color-rp-accent: var(--ray-accent);
+  --color-rp-blue: var(--ray-blue);
+  --color-rp-red: var(--ray-red);
+  --color-rp-green: var(--ray-green);
+  --color-rp-yellow: var(--ray-yellow);
+
+  /* fonts (used by font-sans, etc.) */
+  --font-family-sans: 'Maple Mono', 'system-ui', 'sans-serif';
+}
+
+/* ── Tailwind @theme: static palettes ────────────── */
+/*  These ramps don't flip with .dark — they have a single
+    value across both themes (they're brand identity or
+    pre-existing Tailwind utilities still used by a handful
+    of components). Don't move them under @theme inline.       */
+@theme {
+  /* surface violet ramp (FlyonUI heritage, "bg-surface-500" etc.
+     is a real Tailwind utility used in FileAttachments, BotPreview,
+     MarkdownRenderer). Hardcoded per the original design spec. */
+  --color-surface-50: #f8f7ff;
+  --color-surface-100: #eeeaff;
+  --color-surface-200: #ddd5ff;
+  --color-surface-300: #c4b5ff;
+  --color-surface-400: #a78bfa;
+  --color-surface-500: #8b5cf6;
+  --color-surface-600: #7c3aed;
+  --color-surface-700: #6d28d9;
+  --color-surface-800: #5b21b6;
+  --color-surface-900: #4c1d95;
+  --color-surface-950: #2e1065;
+
+  /* neko cyan (FlyonUI heritage — used in 1 place) */
   --color-neko-50: #ecfeff;
   --color-neko-300: #67e8f9;
   --color-neko-500: #06b6d4;
-
-  --font-family-sans: 'Maple Mono', 'system-ui', 'sans-serif';
 }
 
 /* ════════════════════════════════════════════
    FLYONUI THEME OVERRIDES — Roleplay Studio
    ════════════════════════════════════════════ */
-/* Brand palette */
+/* Brand palette — FlyonUI semantic tokens.
+   The violet/gray ramp that used to live in separate
+   --color-roleplay-studio-* variables is inlined here as raw
+   OKLCH values. Those ramp variables were never referenced
+   from any component (zero hits across src/) — they only
+   served these overrides. Reintroduce via @theme {} if a
+   future agent wants to use bg-roleplay-studio-* utilities. */
 :root {
-  --color-roleplay-studio-50: oklch(92.8% 0.08 265);
-  --color-roleplay-studio-100: oklch(88.6% 0.1 265);
-  --color-roleplay-studio-200: oklch(80.4% 0.12 265);
-  --color-roleplay-studio-300: oklch(72.4% 0.14 265);
-  --color-roleplay-studio-400: oklch(64.6% 0.16 265);
-  --color-roleplay-studio-500: oklch(57% 0.14 265);
-  --color-roleplay-studio-600: oklch(49.6% 0.12 265);
-  --color-roleplay-studio-700: oklch(42.4% 0.1 265);
-  --color-roleplay-studio-800: oklch(35.4% 0.08 265);
-  --color-roleplay-studio-900: oklch(28.6% 0.06 265);
-  --color-roleplay-studio-950: oklch(25.3% 0.05 265);
-  --color-roleplay-studio-gray-50: oklch(98% 0.002 265);
-  --color-roleplay-studio-gray-100: oklch(95.5% 0.004 265);
-  --color-roleplay-studio-gray-200: oklch(89.7% 0.008 265);
-  --color-roleplay-studio-gray-300: oklch(82.7% 0.012 265);
-  --color-roleplay-studio-gray-400: oklch(73% 0.018 265);
-  --color-roleplay-studio-gray-500: oklch(62.5% 0.02 265);
-  --color-roleplay-studio-gray-600: oklch(52.8% 0.016 265);
-  --color-roleplay-studio-gray-700: oklch(41.4% 0.012 265);
-  --color-roleplay-studio-gray-800: oklch(26.9% 0.006 265);
-  --color-roleplay-studio-gray-900: oklch(20.5% 0.004 265);
-  --color-roleplay-studio-gray-950: oklch(14.1% 0.002 265);
-}
-
-/* FlyonUI theme variables — LIGHT */
-:root {
-  --color-primary: var(--color-roleplay-studio-600);
+  --color-primary: oklch(49.6% 0.12 265);
   --color-primary-content: white;
-  --color-secondary: var(--color-roleplay-studio-gray-900);
+  --color-secondary: oklch(20.5% 0.004 265);
   --color-secondary-content: white;
-  --color-accent: var(--color-roleplay-studio-500);
+  --color-accent: oklch(57% 0.14 265);
   --color-accent-content: white;
-  --color-neutral: var(--color-roleplay-studio-gray-200);
-  --color-neutral-content: var(--color-roleplay-studio-gray-800);
+  --color-neutral: oklch(89.7% 0.008 265);
+  --color-neutral-content: oklch(26.9% 0.006 265);
   --color-base-100: white;
-  --color-base-200: var(--color-roleplay-studio-gray-50);
-  --color-base-300: var(--color-roleplay-studio-gray-100);
+  --color-base-200: oklch(98% 0.002 265);
+  --color-base-300: oklch(95.5% 0.004 265);
   --color-info: #0ea5e9;
   --color-info-content: white;
   --color-success: #10b981;
@@ -93,17 +119,17 @@
 
 /* FlyonUI theme variables — DARK */
 .dark {
-  --color-primary: var(--color-roleplay-studio-500);
+  --color-primary: oklch(57% 0.14 265);
   --color-primary-content: white;
   --color-secondary: white;
-  --color-secondary-content: var(--color-roleplay-studio-gray-800);
-  --color-accent: var(--color-roleplay-studio-400);
+  --color-secondary-content: oklch(26.9% 0.006 265);
+  --color-accent: oklch(64.6% 0.16 265);
   --color-accent-content: white;
-  --color-neutral: var(--color-roleplay-studio-gray-600);
-  --color-neutral-content: var(--color-roleplay-studio-gray-200);
-  --color-base-100: var(--color-roleplay-studio-gray-800);
-  --color-base-200: var(--color-roleplay-studio-gray-900);
-  --color-base-300: var(--color-roleplay-studio-gray-950);
+  --color-neutral: oklch(52.8% 0.016 265);
+  --color-neutral-content: oklch(89.7% 0.008 265);
+  --color-base-100: oklch(26.9% 0.006 265);
+  --color-base-200: oklch(20.5% 0.004 265);
+  --color-base-300: oklch(14.1% 0.002 265);
   --color-info: #38bdf8;
   --color-info-content: white;
   --color-success: #34d399;
@@ -286,6 +312,37 @@
   --theme-text: var(--ray-text);
   --theme-text-secondary: var(--ray-text-secondary);
   --theme-border: var(--ray-border);
+}
+
+/* ── Breakpoints (Phase 1.2 — MOBILE_PLAN.md) ───── */
+/*
+  Single source of truth for responsive thresholds.
+  Values match what Tailwind v4 uses by default so
+  `sm:`/`md:`/`lg:` utilities in @apply blocks align
+  with these CSS custom properties.
+
+  Use via @media (min-width: var(--bp-md)) in <style>
+  blocks; use `md:` / `lg:` utilities in @apply chains.
+*/
+:root {
+  --bp-xs: 480px; /* Phone */
+  --bp-sm: 768px; /* Tablet portrait */
+  --bp-md: 1024px; /* Desktop / Tauri */
+  --bp-lg: 1280px; /* Wide desktop */
+}
+
+/* ── iOS safe-area insets ──────────────────────── */
+/*
+  Phase 1.5: bottom-nav and chat-input use these to
+  leave room for the iOS home indicator / Android
+  gesture bar. viewport-fit=cover in index.html is
+  required for the values to be non-zero.
+*/
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
 }
 
 /* ── Raycast utility classes ──────────────────────── */

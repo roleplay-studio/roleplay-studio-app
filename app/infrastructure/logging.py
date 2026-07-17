@@ -46,6 +46,8 @@ from typing import Any
 
 import structlog
 
+from app.domain.constants import LOG_FILE_BACKUP_COUNT, LOG_FILE_MAX_BYTES
+
 # ── Shared processor chain ─────────────────────────────────────────
 # Order matters: each processor transforms the event_dict before
 # the next runs. The chain ends at the renderer (chosen per
@@ -164,6 +166,11 @@ def configure_logging(settings: Any) -> None:
     log_file = getattr(settings, "log_file", None)
     if log_file:
         try:
+            # Local import: keeps ``logging.handlers`` out of the
+            # module-level import set so the stdlib ``logging``
+            # module is fully configured before we touch handlers
+            # that depend on it (avoids a chicken-and-egg on cold
+            # start when this module runs as part of bootstrap).
             from logging.handlers import RotatingFileHandler
 
             # ``log_file`` may be relative to the data dir (so
@@ -182,13 +189,12 @@ def configure_logging(settings: Any) -> None:
                 else Path(data_dir) / log_file
             )
             log_path.parent.mkdir(parents=True, exist_ok=True)
-            # 10 MB x 3 = 30 MB ceiling. A single chat stream can
-            # log hundreds of debug chunks; without rotation this
-            # would fill the user's disk on a misbehaving run.
+            # 10 MB x 3 = 30 MB ceiling (constants live in
+            # app.domain.constants — tune there, not here).
             file_handler = RotatingFileHandler(
                 log_path,
-                maxBytes=10 * 1024 * 1024,
-                backupCount=3,
+                maxBytes=LOG_FILE_MAX_BYTES,
+                backupCount=LOG_FILE_BACKUP_COUNT,
                 encoding="utf-8",
             )
             file_handler.setFormatter(formatter)

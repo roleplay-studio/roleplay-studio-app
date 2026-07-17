@@ -12,7 +12,7 @@ const DEFAULT_API_BASE = 'http://127.0.0.1:55245';
 // `docker compose up` automatically uses relative URLs that go
 // through Vite → backend container. No environment-switch dance
 // needed at the JS layer.
-const USE_PROXY =
+const USE_PROXY_BUILD =
   // Vite injects import.meta.env.* at build time; the boolean
   // cast works whether the flag was set as `true` or `"true"`.
   // string('true') === true, so the negation below is safe.
@@ -20,12 +20,41 @@ const USE_PROXY =
   // (direct fetch from :55245).
   String(import.meta.env?.VITE_USE_PROXY ?? '').toLowerCase() === 'true';
 
+// Smart default: if the page is served from a non-loopback host
+// (e.g. http://192.168.3.150:1420 from a phone or a different
+// machine on the LAN) then ``DEFAULT_API_BASE`` (``127.0.0.1``)
+// resolves to *the client machine*, not the dev box — so a
+// direct fetch silently fails. In that case, force the proxy
+// mode at runtime so requests go through the Vite dev server's
+// own port, where ``vite.config.ts`` proxies them onto the
+// backend. Loopback hosts (localhost, 127.0.0.1, ::1) keep the
+// historical direct-fetch behaviour — fastest path on the dev
+// box itself.
+function isLoopbackHost(hostname: string): boolean {
+  return (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '[::1]' ||
+    hostname === '::1' ||
+    hostname === ''
+  );
+}
+function shouldUseProxy(): boolean {
+  if (USE_PROXY_BUILD) return true;
+  if (typeof window === 'undefined') return false;
+  const hostname = window.location?.hostname ?? '';
+  // If the page is served from a non-loopback host, we have no
+  // choice but to proxy — the default 127.0.0.1 would target
+  // the wrong machine.
+  return !isLoopbackHost(hostname);
+}
+
 const PROXY_API_BASE =
   typeof window !== 'undefined' && window.location?.origin
     ? window.location.origin
     : DEFAULT_API_BASE;
 
-const INITIAL_API_BASE = USE_PROXY ? PROXY_API_BASE : DEFAULT_API_BASE;
+const INITIAL_API_BASE = shouldUseProxy() ? PROXY_API_BASE : DEFAULT_API_BASE;
 
 /**
  * Resolved API base URL. Re-reads `localStorage.serverUrl` on every

@@ -200,12 +200,57 @@
     padding-left: 36px !important;
   }
 
-  /* ─── Filters ─── */
+  /* ─── Filters (Phase 2 — MOBILE_PLAN.md) ─── */
+  /*
+    Desktop (>=768px): multi-row flex-wrap, fits however many pills exist.
+    Mobile (<768px): single-row horizontal-scroll with right-edge fade
+    gradient — gives users a visual cue that more categories exist
+    off-screen without forcing a 5-row wall of pills.
+  */
   .dash-filters {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
   }
+
+  @media (max-width: 767.98px) {
+    .dash-filters {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      overflow-y: hidden;
+      /* Negative margin + padding so the fade doesn't clip pill focus rings */
+      margin: 0 -16px;
+      padding: 4px 16px;
+      /* Right-edge fade affordance — see DESIGN.md §No HTML title attr,
+         we don't use that; instead we hint at scroll with a visual cue.
+         `mask-image` is supported in all evergreen browsers (Safari 4+,
+         Chrome 4+, Firefox 53+) — see caniuse.com/mdn-css_properties_mask-image */
+      -webkit-mask-image: linear-gradient(
+        to right,
+        rgba(0, 0, 0, 1) 0%,
+        rgba(0, 0, 0, 1) calc(100% - 24px),
+        rgba(0, 0, 0, 0) 100%
+      );
+      mask-image: linear-gradient(
+        to right,
+        rgba(0, 0, 0, 1) 0%,
+        rgba(0, 0, 0, 1) calc(100% - 24px),
+        rgba(0, 0, 0, 0) 100%
+      );
+      /* Disable scroll-snap so users can land on whichever pill they want */
+      scrollbar-width: none; /* Firefox */
+    }
+    .dash-filters::-webkit-scrollbar {
+      display: none; /* Chromium / Safari */
+    }
+    /* Prevent the active pill's content from being clipped by the fade.
+       Each pill keeps its focus-ring intact since the fade only affects
+       the rightmost 24px of the strip. */
+    .dash-filter-pill {
+      flex-shrink: 0;
+    }
+  }
+
   .dash-filter-pill {
     padding: 5px 14px;
     border-radius: 86px;
@@ -218,6 +263,7 @@
     letter-spacing: 0.2px;
     cursor: pointer;
     transition: all 0.12s ease;
+    -webkit-tap-highlight-color: transparent;
   }
   .dash-filter-pill:hover {
     border-color: var(--dash-border-strong);

@@ -926,7 +926,20 @@ class SqlAlchemyMessageRepository:
                 rows_result = await session.execute(
                     text(
                         f"SELECT id, thread_id, role, content, short_content, timestamp, "
-                        f"branch_group, branch_index, is_active, dynamic_system_prompt "
+                        f"branch_group, branch_index, is_active, dynamic_system_prompt, "
+                        # Added in 0.0.8: pull ``reasoning`` and ``state``
+                        # from the raw-SQL branch path too. Earlier this
+                        # SELECT only listed ``content``-shape columns,
+                        # so branched messages (regenerate / retry
+                        # versions) came back with ``reasoning=None`` and
+                        # ``state=None`` on every read — the chat UI
+                        # then hid both the reasoning `<details>` panel
+                        # and the world-state `<details>` panel for
+                        # older regenerated assistant messages. The
+                        # direct ORM-model path higher up already
+                        # carried these columns; the branch-versions
+                        # path didn't.
+                        f"reasoning, state "
                         f"FROM conversations "
                         f"WHERE thread_id = :tid AND branch_group IN ({placeholders}) "
                         f"ORDER BY branch_index ASC"
@@ -960,6 +973,14 @@ class SqlAlchemyMessageRepository:
                             # column and ``MessageDTO`` defaults to
                             # ``None`` on construction.
                             dynamic_system_prompt=row.dynamic_system_prompt or None,
+                            # Added in 0.0.8: same fix for the
+                            # reasoning `<details>` panel and the
+                            # world-state panel. Earlier the SELECT
+                            # clause omitted both columns, so even
+                            # though we now read them at the SQL
+                            # layer, Python doesn't know about them.
+                            reasoning=row.reasoning,
+                            state=row.state,
                         )
                     )
 

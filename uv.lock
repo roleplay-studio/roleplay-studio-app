@@ -453,8 +453,8 @@ wheels = [
 
 [[package]]
 name = "format-standart-rp"
-version = "0.1.1"
-source = { git = "https://github.com/roleplay-studio/format-standart-rp?branch=main#3dd22eff7aa21ce94a76941eaccd4ef5d14841e6" }
+version = "0.1.2"
+source = { git = "https://github.com/roleplay-studio/format-standart-rp?branch=main#cdd8a80bf1cc46f35e41a4a8ccffb1f75e2508cb" }
 
 [[package]]
 name = "frozenlist"

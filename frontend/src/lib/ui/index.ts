@@ -1,5 +1,7 @@
 export { default as Alert } from './Alert.svelte';
 export { default as Badge } from './Badge.svelte';
+// Phase 3.1 — bottom-sheet overlay (mobile-only)
+export { default as BottomSheet } from './BottomSheet.svelte';
 export { default as Button } from './Button.svelte';
 export { default as Card } from './Card.svelte';
 export { default as ChatBubble } from './ChatBubble.svelte';

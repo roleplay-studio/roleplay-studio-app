@@ -80,7 +80,16 @@ def build_container(settings: Settings | None = None) -> ApplicationContainer:
     # ``startup()`` / ``close()`` / ``generate_response*`` contract so
     # downstream services need no branching.
     try:
-        llm = make_llm(settings)
+        # ``chat_model`` carries the user-picked model from
+        # SetupWizard / Settings. Without this override the factory
+        # falls back to the catalog's ``default_model``
+        # (``deepseek-chat`` for the deepseek provider), so a user
+        # who typed ``deepseek-v4-pro`` into the Settings field
+        # silently got ``deepseek-chat`` answers on the next
+        # request. Same reasoning as ``fast_model`` further down —
+        # both names live in ``Settings``, both need to flow into
+        # ``make_llm`` explicitly.
+        llm = make_llm(settings, model_override=settings.chat_model)
         fast_llm = make_llm(settings, model_override=settings.fast_model)
     except (ConfigurationError, Exception):
         llm = None

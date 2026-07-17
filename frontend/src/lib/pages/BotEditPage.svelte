@@ -1945,6 +1945,40 @@
     .greetings-tabs-row {
       flex-wrap: wrap;
     }
+    /* Phase 3.3 — Mobile horizontal-scroll tabs with fade affordance.
+       4 tabs (Config / Knowledge / Versions / Prompts) don't fit at
+       390px without wrapping, and wrapping creates 2-3 rows that
+       push the form content below the fold. horizontal-scroll keeps
+       one row + a visual cue that more tabs exist off-screen. */
+    .edit-tabs {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      overflow-y: hidden;
+      /* Bleed into page gutters so fade doesn't clip focus rings */
+      margin: 0 -16px 28px;
+      padding: 4px 16px;
+      /* Right-edge fade — see Dashboard.svelte for the same pattern */
+      -webkit-mask-image: linear-gradient(
+        to right,
+        rgba(0, 0, 0, 1) 0%,
+        rgba(0, 0, 0, 1) calc(100% - 24px),
+        rgba(0, 0, 0, 0) 100%
+      );
+      mask-image: linear-gradient(
+        to right,
+        rgba(0, 0, 0, 1) 0%,
+        rgba(0, 0, 0, 1) calc(100% - 24px),
+        rgba(0, 0, 0, 0) 100%
+      );
+      scrollbar-width: none; /* Firefox */
+    }
+    .edit-tabs::-webkit-scrollbar {
+      display: none; /* Chromium / Safari */
+    }
+    .edit-tab {
+      flex: 0 0 auto; /* override flex: 1 from desktop */
+      min-width: 110px; /* ensure tap target is wide enough */
+    }
   }
 
   /* ── mes_example editor section ─────────────────────────── */

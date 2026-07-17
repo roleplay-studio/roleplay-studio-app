@@ -44,7 +44,7 @@ MAX_AVATAR_SIZE = 10 * 1024 * 1024
 MAX_CHAT_IMPORT_SIZE = 20 * 1024 * 1024
 MAX_IMPORT_SIZE = 20 * 1024 * 1024
 _IMPORT_EXTS = {".json", ".png", ".webp", ".jpg", ".jpeg"}
-
+# TODO(for-assistant): вынести переменные в общие настройки
 
 # ── Categories ───────────────────────────────────────────────────────
 
@@ -230,6 +230,7 @@ async def delete_bot(bot_id: int, container: ContainerDep):
 
 class CreateBotVersionRequest(BaseModel):
     note: str = ""
+    # TODO(for-assistant): такие классы нужнор выносить в отдельный файл
 
 
 @router.get("/{bot_id}/versions", response_model=list[BotVersionDTO])

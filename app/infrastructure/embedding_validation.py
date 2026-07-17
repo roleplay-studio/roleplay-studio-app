@@ -2,6 +2,11 @@
 
 import httpx
 
+from app.domain.constants import (
+    EMBEDDING_VALIDATION_TIMEOUT_SECONDS,
+    HTTP_NOT_FOUND,
+    HTTP_UNAUTHORIZED,
+)
 from app.domain.exceptions import ConfigurationError
 
 
@@ -21,13 +26,13 @@ def validate_embedding_endpoint(base_url: str, api_key: str | None, model: str) 
             f"{base_url.rstrip('/')}/embeddings",
             headers=headers,
             json={"input": "test", "model": model},
-            timeout=15.0,
+            timeout=EMBEDDING_VALIDATION_TIMEOUT_SECONDS,
         )
         resp.raise_for_status()
     except httpx.HTTPStatusError as e:
-        if e.response.status_code == 401:
+        if e.response.status_code == HTTP_UNAUTHORIZED:
             raise ConfigurationError("Authentication failed. Check your API key.") from e
-        if e.response.status_code == 404:
+        if e.response.status_code == HTTP_NOT_FOUND:
             raise ConfigurationError(f"Model '{model}' not found on this endpoint.") from e
         raise ConfigurationError(f"Embedding endpoint returned {e.response.status_code}.") from e
     except httpx.ConnectError as e:

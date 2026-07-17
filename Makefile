@@ -442,6 +442,20 @@ docker-up: ## Build images and start the dev stack in foreground
 docker-up-d: ## Start the dev stack in background (logs via docker-logs)
 	$(COMPOSE) up -d --build
 
+.PHONY: docker-up-fast
+docker-up-fast: ## Start the dev stack from existing images (no rebuild — instant when images cached)
+	$(COMPOSE) up -d --no-build --no-deps --no-recreate
+# ^^ ``--no-build`` skips the image-build phase (this is what made
+# ``up -d --build`` feel slow — Docker re-checks Dockerfile hashes
+# even when nothing relevant changed).
+# ``--no-deps`` skips the dependency health-check chain; the dev
+# stack's own healthcheck takes ~30s to flip green on a cold start
+# and ``up`` waits for it before considering the frontend up.
+# ``--no-recreate`` skips container recreation if the config is
+# unchanged — saves another ~5s of stop/start churn on warm runs.
+# Use ``make docker-up-d`` (without ``-fast``) when you've actually
+# changed a Dockerfile or docker-compose.yml and want a real rebuild.
+
 .PHONY: docker-down
 docker-down: ## Stop and remove containers (keeps the data volume)
 	$(COMPOSE) down
@@ -494,13 +508,56 @@ docker-test-shell: ## Drop into a shell in the test compose (debug fixtures inte
 docker-ruff: ## Run ruff check inside the backend container
 	$(COMPOSE_TEST) run --rm backend ruff check .
 
+.PHONY: docker-ruff-fix
+docker-ruff-fix: ## Run ruff check --fix inside the backend container (auto-fix safe issues)
+	$(COMPOSE_TEST) run --rm backend ruff check --fix .
+
+.PHONY: docker-ruff-format
+docker-ruff-format: ## Run ruff format inside the backend container
+	$(COMPOSE_TEST) run --rm backend ruff format .
+
 .PHONY: docker-frontend-lint
-docker-frontend-lint: ## Run frontend eslint inside its container
+docker-frontend-lint: ## Run frontend eslint inside its container (dev stack)
 	$(COMPOSE) exec frontend npm run lint
 
 .PHONY: docker-frontend-test
-docker-frontend-test: ## Run frontend vitest inside its container
+docker-frontend-test: ## Run frontend vitest inside its container (dev stack)
 	$(COMPOSE) exec frontend npm run test
+
+# Isolated variants — run inside the test compose override without
+# requiring the dev stack to be up. These are the recipes the assistant
+# uses for verification (per AGENTS.md §4a) and they're also what an
+# operator wants when their own ``make dev-frontend`` is already
+# squatting on :1420. Naming convention: ``docker-frontend-lint-test``
+# (the trailing ``-test`` means "via test compose").
+#
+# Speed: ``run --rm`` on a pre-built image is ~8s warm for vitest and
+# ~3s for eslint (anonymous node_modules volume caches deps across
+# runs). No need to spin up the dev stack or fight port conflicts.
+#
+# ``--no-deps`` is critical here — without it, ``run`` would also
+# start the test-override's ``backend`` service, which sits on
+# ``sleep infinity`` with the entrypoint shim and never passes its
+# healthcheck. The frontend's lint/vitest don't need backend at all.
+.PHONY: docker-frontend-lint-test
+docker-frontend-lint-test: ## Run frontend eslint in ISOLATED test compose (no dev stack)
+	$(COMPOSE_TEST) run --rm --no-deps frontend npm run lint
+
+.PHONY: docker-frontend-test-test
+docker-frontend-test-test: ## Run frontend vitest in ISOLATED test compose (no dev stack)
+	$(COMPOSE_TEST) run --rm --no-deps frontend npm run test
+
+# Aggregator — runs everything that matters in test-override (no dev
+# stack required). Useful as a one-shot "is this PR green?" gate that
+# the assistant can invoke safely from anywhere. Named ``-all`` to
+# avoid colliding with the host-side ``make check`` (which runs
+# lint+format+pytest on the host, no docker).
+.PHONY: docker-check-all
+docker-check-all: ## Run ruff + pytest + eslint + vitest, all in isolated test compose
+	$(COMPOSE_TEST) run --rm backend ruff check .
+	$(COMPOSE_TEST) run --rm backend pytest
+	$(COMPOSE_TEST) run --rm --no-deps frontend npm run lint
+	$(COMPOSE_TEST) run --rm --no-deps frontend npm run test
 
 # ─── Clean ─────────────────────────────────────────────────────────
 

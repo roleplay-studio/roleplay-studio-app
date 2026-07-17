@@ -20,6 +20,15 @@ logs/
 .hermes
 AGENTS.md
 
+# Local code-review tool exports — not for git.
+# CSV exports from review bots (Codeball, Qodana, Copilot Review, etc.)
+# are noise: priority/category are usually wrong, comment bodies are
+# missing, and they're regenerated on every review run. Keep locally
+# for one-shot triage, then delete.
+code-review.csv
+*-review.csv
+review-*.csv
+
 # Playwright E2E
 frontend/e2e_tmp/
 frontend/test-results/
