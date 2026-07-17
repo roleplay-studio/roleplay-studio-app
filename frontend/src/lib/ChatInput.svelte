@@ -379,6 +379,12 @@
     align-items: center;
     gap: 6px;
     padding: 10px 16px;
+    /* Phase 4.3 — iOS home indicator / Android gesture bar.
+       env(safe-area-inset-bottom) is 0px on desktop browsers, ~34px
+       on iPhones with notch/Dynamic Island. The fallback (0px) makes
+       the rule a no-op when safe-area isn't supported (Safari 11+ /
+       Chrome 69+). */
+    padding-bottom: calc(10px + var(--safe-bottom, 0px));
   }
   .ci-tool-btn {
     display: flex;

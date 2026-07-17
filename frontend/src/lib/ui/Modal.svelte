@@ -172,8 +172,12 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 28px;
-    height: 28px;
+    /* Phase 4.2 — 44×44px tap target. Modal close is the most-clicked
+       UI element across the app (every confirmation/notification), so
+       this gets a real touch area even though the visible "×" stays
+       at 14px. */
+    width: 44px;
+    height: 44px;
     border: none;
     border-radius: 6px;
     background: transparent;

@@ -217,8 +217,12 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 24px;
-    height: 24px;
+    /* Phase 4.2 — Apple HIG / Material 3 minimum tap target is 44×44px.
+       Visible icon stays 24px but the button is padded to a 44×44 hit
+       area so the user can hit it on tablet touchscreens without
+       zooming in. */
+    width: 44px;
+    height: 44px;
     border: none;
     border-radius: 6px;
     /*background: transparent;*/
@@ -241,8 +245,9 @@
     background: var(--sb-bg);
     border: 1px solid var(--sb-border);
     border-radius: 6px;
-    width: 30px;
-    height: 30px;
+    /* Phase 4.2 — 44×44 tap target (overrides base 44×44 width/height
+       above only by inheriting them; we keep the override here to
+       document intent) */
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
   }
   .sb-closed .sb-brand:hover .sb-expand-btn {

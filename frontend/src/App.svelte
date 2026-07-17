@@ -169,6 +169,41 @@
   });
 
   /**
+   * Phase 4.4 — keep `<meta name="theme-color">` in sync with the
+   * resolved theme. The HTML already declares both light and dark
+   * defaults in index.html, but if the user toggles light/dark/system
+   * at runtime the meta tag still shows the boot-time color. We watch
+   * the `<html>` class for the `.dark` class added by theme.ts and
+   * swap the meta tag accordingly.
+   *
+   * Safari iOS and Android Chrome use this color for the status bar
+   * and address bar tint, so a stale value is visually jarring when
+   * the user toggles themes.
+   */
+  $effect(() => {
+    if (typeof document === 'undefined') return;
+
+    const apply = () => {
+      const isDark = document.documentElement.classList.contains('dark');
+      const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+      if (!meta) return;
+      // Same hex values as DESIGN.md §Colors / index.html defaults.
+      meta.setAttribute('content', isDark ? '#07080a' : '#f5f5f7');
+    };
+
+    apply();
+
+    // Watch for class changes on <html> (added/removed by theme.ts).
+    const observer = new MutationObserver(apply);
+    observer.observe(document.documentElement, {
+      attributeFilter: ['class'],
+      attributes: true,
+    });
+
+    return () => observer.disconnect();
+  });
+
+  /**
    * Poll /api/health until the backend reports 200, then check
    * whether first-run setup is needed. While the backend is starting
    * up (listening on the port but the FastAPI lifespan not yet

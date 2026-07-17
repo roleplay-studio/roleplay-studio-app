@@ -44,6 +44,12 @@ export default defineConfig({
       use: { ...devices['Pixel 7'] },
     },
     {
+      // Phase 4.5 — touch-target audit at 390×844 viewport
+      name: 'mobile-audit-chromium',
+      testMatch: /mobile-touch-targets\.spec\.ts/,
+      use: { ...devices['Pixel 7'] },
+    },
+    {
       name: 'integration-chromium',
       testMatch: /integration\/.*\.spec\.ts/,
       use: { ...devices['Desktop Chrome'] },

@@ -398,14 +398,18 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    /* Phase 4.2 — 44×44px tap target per Apple HIG / Material 3.
+       The header can comfortably fit 6 of these on a 390 viewport
+       (each gets ~65px), so we don't need to shrink the visible icon. */
+    width: 44px;
+    height: 44px;
     border: none;
     border-radius: 6px;
     background: transparent;
     color: var(--ch-text-secondary);
     cursor: pointer;
     transition: all 0.12s ease;
+    flex-shrink: 0;
   }
   .ch-btn:hover {
     background: var(--ch-hover);
