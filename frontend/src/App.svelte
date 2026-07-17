@@ -8,6 +8,7 @@
   import { currentLang, t } from './lib/i18n';
   import MobileBottomNav from './lib/MobileBottomNav.svelte';
   import MobileMoreSheet from './lib/MobileMoreSheet.svelte';
+  import OfflineBanner from './lib/OfflineBanner.svelte';
   import BotCreatePage from './lib/pages/BotCreatePage.svelte';
   import BotEditPage from './lib/pages/BotEditPage.svelte';
   import BotPreviewPage from './lib/pages/BotPreviewPage.svelte';
@@ -405,6 +406,11 @@
     {/if}
   </div>
   <GlobalDropZone />
+  <!-- Phase 5.4 — OfflineBanner is rendered outside the main shell so it
+       sits above any page content, at z-index 70 (above BottomNav's 50,
+       above MobileMoreSheet's 61). It only renders when navigator.onLine
+       becomes false. -->
+  <OfflineBanner />
 {/if}
 
 <style>
