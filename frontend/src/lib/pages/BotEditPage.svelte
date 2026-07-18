@@ -2,9 +2,18 @@
   import { onMount, tick } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
 
-  import { api, API_BASE, type Bot, BOT_TYPES, type BotType, type KnowledgeEntry } from '../api';
+  import {
+    api,
+    API_BASE,
+    type Bot,
+    BOT_TYPES,
+    type BotType,
+    type KnowledgeEntry,
+    type SkillDTO,
+  } from '../api';
   import AvatarUpload from '../AvatarUpload.svelte';
   import CategoryPicker from '../CategoryPicker.svelte';
+  import SkillPicker from '../SkillPicker.svelte';
   import { currentLang, t } from '../i18n';
   import MarkdownRenderer from '../MarkdownRenderer.svelte';
   import { Input, Loading, Select, Tabs, Textarea } from '../ui';
@@ -52,8 +61,13 @@
   let formCategories: string[] = $state([]);
   let formBotType: BotType = $state('rp');
   let allCategories: string[] = $state([]);
-  let uploading = $state(false);
 
+  // Skills — Phase 6
+  let formSkillIds: number[] = $state([]);
+  let allSkills: SkillDTO[] = $state([]);
+  let maxSkillsPerBot = 10;
+
+  let uploading = $state(false);
   // Knowledge base
   let entries: KnowledgeEntry[] = $state([]);
   let newKnowledgeContent = $state('');
@@ -92,14 +106,17 @@
     try {
       const id = parseInt(botId);
       if (id) {
-        const [b, cats, kEntries] = await Promise.all([
+        const [b, cats, kEntries, skills] = await Promise.all([
           api.getBot(id),
           api.categories(),
           api.listKnowledge(id),
+          api.listSkills(),
         ]);
         bot = b;
         allCategories = cats;
         entries = kEntries;
+        allSkills = skills;
+        formSkillIds = b.skills ?? [];
 
         formName = b.name;
         formPersonality = b.personality;
@@ -177,6 +194,11 @@
     };
     try {
       await api.updateBot(bot.id, payload);
+      // Skill attachments go through their own endpoint
+      // (Phase 6) — the bot-payload would otherwise have to encode
+      // a list[int] which serialises as JSON inside a JSON body.
+      // See api.updateBotSkills.
+      await api.updateBotSkills(bot.id, formSkillIds);
       bot = await api.getBot(bot.id);
     } catch (e) {
       console.error('Save failed:', e);
@@ -668,6 +690,16 @@
               {allCategories}
               selected={formCategories}
               onchange={(cats) => (formCategories = cats)}
+            />
+          </div>
+
+          <!-- Skills — Phase 6 -->
+          <div class="field-group">
+            <SkillPicker
+              allSkills={allSkills}
+              attachedIds={formSkillIds}
+              maxReached={formSkillIds.length >= maxSkillsPerBot}
+              onchange={(ids) => (formSkillIds = ids)}
             />
           </div>
         </div>
