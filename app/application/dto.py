@@ -449,6 +449,15 @@ class ConversationRequest(BaseModel):
     # floating reminder so the LLM sees the freshest world context
     # before the new user turn.
     prev_world_state: str = ""
+    # Resolved list of skills attached to this bot. Populated by
+    # ``ChatService._build_request`` from ``Bot.skill_ids`` joined
+    # against the global ``GlobalSkill`` table. Empty list = no
+    # skills (the orchestrator omits the <Skills> block entirely).
+    # The orchestrator renders these as a single
+    # ``<Skills>...</Skills>`` system message placed right after
+    # ``<Persona>/<Scenario>`` so the LLM sees the behavioural
+    # rules in a stable position. See spec §7.
+    skills: list[SkillDTO] = Field(default_factory=list)
 
 
 # ── File Upload DTO ─────────────────────────────────────────────────

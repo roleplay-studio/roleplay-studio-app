@@ -17,7 +17,7 @@ from typing import TypedDict
 
 from langgraph.graph import END, StateGraph
 
-from app.application.dto import ConversationRequest
+from app.application.dto import ConversationRequest, SkillDTO
 from app.application.exceptions import ExternalServiceError
 from app.application.ports import BotPreambleProvider, LLMPort
 from app.domain.enums import BotType
@@ -273,10 +273,23 @@ class LangGraphConversationOrchestrator:
     # ── Graph nodes ───────────────────────────────────────────────────
 
     def _node_system_prompt(self, state: OrchestratorState) -> OrchestratorState:
-        """Build system prompt from personality, scenario, and user persona."""
+        """Build system prompt from personality, scenario, user persona, and skills.
+
+        Skills block lands immediately after ``<Persona>/<Scenario>``
+        so the LLM sees behavioural rules in a stable position —
+        before any per-turn injections ([Reminder], [World state]).
+        See spec §7.2 for ordering rationale.
+        """
         request = state["request"]
         bot_type = self._normalize_bot_type(request.bot_type)
         messages = [self._build_system_message(request, bot_type)]
+        # Inject the <Skills>...</Skills> catalog right after persona
+        # (Task 9). The streaming path mirrors this in _build_all_messages
+        # (Task 10) — both go through ``_build_skills_block`` to keep
+        # the format in sync.
+        skills_block = self._build_skills_block(request.skills)
+        if skills_block is not None:
+            messages.append(skills_block)
         return {**state, "messages": messages, "bot_type": bot_type}
 
     def _node_history(self, state: OrchestratorState) -> OrchestratorState:
@@ -499,6 +512,44 @@ class LangGraphConversationOrchestrator:
             "content": "The user uploaded the following files:\n\n" + "\n\n---\n\n".join(parts),
         }
 
+    def _build_skills_block(
+        self, skills: list[SkillDTO]
+    ) -> dict[str, str] | None:
+        """Assemble the ``<Skills>...</Skills>`` system message.
+
+        Single source of truth for the catalog format. Used by BOTH:
+          - ``_node_system_prompt`` (graph path, see Task 9)
+          - ``_build_all_messages`` (streaming path, see Task 10)
+
+        Returns ``None`` when ``skills`` is empty — the caller skips
+        appending entirely. This keeps the system prompt minimal
+        for bots that don't use the feature.
+
+        See spec §7.2.
+        """
+        if not skills:
+            return None
+        lines = [
+            "You have access to the following skills. Each describes a way of behaving or",
+            "formatting your response. Apply a skill when its trigger condition is met.",
+            "Do NOT mention skills you are not applying. Skills do not call external tools —",
+            "they only change how you write.",
+            "",
+        ]
+        for s in skills:
+            desc = s.description.strip()
+            if not desc:
+                # Fallback to truncated instruction — keeps the catalog
+                # concise even when authors leave the short description
+                # blank. 200 chars + ellipsis mirrors the dev-mode
+                # preview length cap in BotSkillDTO. See spec §7.1.
+                desc = s.instruction.strip()[:200].rstrip() + "…"
+            lines.append(f"- **{s.name}** — {desc}")
+        return {
+            "role": "system",
+            "content": "<Skills>\n" + "\n".join(lines) + "\n</Skills>",
+        }
+
     # ── Helpers ───────────────────────────────────────────────────────
 
     @staticmethod
@@ -550,6 +601,13 @@ class LangGraphConversationOrchestrator:
 
         # System prompt
         messages.append(self._build_system_message(request, bot_type))
+
+        # Skills catalog — mirror of the graph path's _node_system_prompt
+        # (Task 9). Must stay in sync via the shared ``_build_skills_block``
+        # helper. See spec §7.2 + AGENTS.md §2 "parallel paths" rule.
+        skills_block = self._build_skills_block(request.skills)
+        if skills_block is not None:
+            messages.append(skills_block)
 
         # V1/V2/V3 `mes_example` — few-shot dialogue examples.
         # Injected as a separate system message between the main system
