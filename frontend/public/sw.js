@@ -31,7 +31,7 @@
  * Versioning: cache name includes the version. Bump when rules change.
  */
 
-const SW_VERSION = 'v1';
+const SW_VERSION = 'v2';
 const STATIC_CACHE = `static-${SW_VERSION}`;
 const RUNTIME_CACHE = `runtime-${SW_VERSION}`;
 
@@ -49,6 +49,10 @@ const CACHEABLE_GET_PREFIXES = [
   '/api/bots',
   '/api/personas',
   '/api/categories',
+  // Skills library — read-only catalog, safe to cache.
+  // Mutations (POST/PUT/DELETE) don't reach this handler because
+  // the GET-only branch above rejects non-GETs by method.
+  '/api/skills',
   '/uploads/',
 ];
 
