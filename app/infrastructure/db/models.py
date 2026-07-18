@@ -40,9 +40,10 @@ class Bot(SQLModel, table=True):
     world_state_prompt: str = Field(default="")
     # JSON list[int] — IDs of attached GlobalSkill rows. See spec §4.1.
     # Empty = no skills (skills-блок не инжектится). Stored as TEXT
-    # (parity with ``categories`` and ``alternate_greetings``). On
-    # existing DBs, SQLAlchemy ``create_all`` issues ALTER TABLE ADD
-    # COLUMN to migrate transparently.
+    # (parity with ``categories`` and ``alternate_greetings``).
+    # Migration handled by Alembic (see alembic/versions/a7c3f8e1d2b4_*);
+    # ``create_all`` only creates the table for fresh DBs — existing
+    # databases get the column via the migration script.
     skill_ids: str = Field(default="[]", nullable=False)
 
     threads: list["ChatThread"] = Relationship(
@@ -80,6 +81,11 @@ class GlobalSkill(SQLModel, table=True):
     instruction: str = Field(nullable=False)
     tags: str = Field(default="[]", nullable=False)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    # ``updated_at`` is set explicitly in
+    # ``SqlAlchemySkillRepository.update`` (hand-rolled SQLAlchemy
+    # timestamp update). Could be moved to a schema-level
+    # ``onupdate`` trigger, but the existing pattern keeps the SQL
+    # explicit and easy to trace — see git history.
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 

@@ -1,5 +1,6 @@
 """Bot CRUD routes."""
 
+import json
 import os
 import uuid
 from pathlib import Path
@@ -154,8 +155,21 @@ async def list_bots(container: ContainerDep):
         if settings_svc is not None
         else None
     )
+    # Resolve live skill IDs so BotResponse.skills_invalid is populated
+    # for orphan refs (a skill that was deleted but bot.skill_ids still
+    # points at). Graceful degradation: when the skill service is
+    # missing, valid_skill_ids is None and skills_invalid stays empty.
+    # See skill-api OCR review finding 2026-07-17 (CRITICAL).
+    valid_skill_ids: set[int] | None = None
+    if getattr(container, "skills", None) is not None:
+        valid_skill_ids = await container.skills.list_all_skill_ids()
     return [
-        BotResponse.from_orm_bot(bot, count, valid_categories=valid_categories)
+        BotResponse.from_orm_bot(
+            bot,
+            count,
+            valid_categories=valid_categories,
+            valid_skill_ids=valid_skill_ids,
+        )
         for bot, count in bots_with_counts
     ]
 
@@ -183,8 +197,15 @@ async def get_bot(bot_id: int, container: ContainerDep):
             if settings_svc is not None
             else None
         )
+        # Skill cross-reference for skills_invalid (OCR review 2026-07-17).
+        valid_skill_ids: set[int] | None = None
+        if getattr(container, "skills", None) is not None:
+            valid_skill_ids = await container.skills.list_all_skill_ids()
         return BotResponse.from_orm_bot(
-            bot, thread_count, valid_categories=valid
+            bot,
+            thread_count,
+            valid_categories=valid,
+            valid_skill_ids=valid_skill_ids,
         )
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
@@ -590,9 +611,7 @@ async def list_bot_skills(bot_id: int, container: ContainerDep):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail=f"Bot {bot_id} not found"
         )
-    import json as _json
-
-    skill_ids = _json.loads(getattr(bot, "skill_ids", "[]") or "[]")
+    skill_ids = json.loads(getattr(bot, "skill_ids", "[]") or "[]")
     return await container.skills.list_for_bot_with_ids(skill_ids)
 
 

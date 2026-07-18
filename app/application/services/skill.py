@@ -92,6 +92,18 @@ class SkillService:
         skills = await self._repo.list_by_ids(skill_ids)
         return [self._to_dto(s) for s in skills]
 
+    async def list_all_skill_ids(self) -> set[int]:
+        """Return the set of all live skill IDs.
+
+        Used by ``BotResponse.from_orm_bot`` (via the route layer) to
+        populate ``skills_invalid`` — orphan IDs that no longer resolve
+        to a live GlobalSkill. O(N) over the skills table — small N
+        (catalog is hand-curated), so an in-memory set is the right
+        shape vs a M2M-table lookup.
+        """
+        skills: list[GlobalSkill] = await self._repo.list_all()
+        return {s.id for s in skills if s.id is not None}
+
     # ── Write paths ─────────────────────────────────────────────
 
     async def create_skill(self, command: CreateSkillCommand) -> int:
