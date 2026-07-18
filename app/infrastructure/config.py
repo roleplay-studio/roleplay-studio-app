@@ -155,6 +155,13 @@ class Settings(BaseSettings):
     chroma_collection_prefix: str = "kb_bot_"
     upload_dir: str = "uploads"
 
+    # ── Skills (Phase 2, declared early so SkillService compiles) ──
+    # Maximum number of skills a single bot can have attached.
+    # Configurable via SKILLS_MAX_PER_BOT env var (default 10).
+    # See spec §6.3 for the limit rationale and Phase 3 for full
+    # Settings wiring + Settings-page UI.
+    skills_max_per_bot: int = Field(default=10, ge=1, le=50)
+
     # ── RAG / Memory ───────────────────────────────────────────────
     knowledge_relevance_threshold: float = Field(0.3, ge=0.0, le=1.0)
     # Maximum messages loaded from the DB for the LLM context.
