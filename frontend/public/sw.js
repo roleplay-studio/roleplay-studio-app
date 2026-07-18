@@ -1,4 +1,4 @@
-/* eslint-disable no-restricted-globals */
+ /* eslint-disable no-restricted-globals */
 /**
  * Service Worker — Phase 5.3 of docs/MOBILE_PLAN.md
  *
@@ -74,7 +74,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
-      const keep = new Set([STATIC_CACHE, RUNTIME_CACHE]);
+      const keep = new Set([RUNTIME_CACHE, STATIC_CACHE]);
       const keys = await caches.keys();
       await Promise.all(keys.filter((k) => !keep.has(k)).map((k) => caches.delete(k)));
       await self.clients.claim();
