@@ -38,10 +38,49 @@ class Bot(SQLModel, table=True):
     # ``Conversation.state``. The bot developer owns the output format
     # via this prompt (YAML, JSON, prose, custom — anything).
     world_state_prompt: str = Field(default="")
+    # JSON list[int] — IDs of attached GlobalSkill rows. See spec §4.1.
+    # Empty = no skills (skills-блок не инжектится). Stored as TEXT
+    # (parity with ``categories`` and ``alternate_greetings``). On
+    # existing DBs, SQLAlchemy ``create_all`` issues ALTER TABLE ADD
+    # COLUMN to migrate transparently.
+    skill_ids: str = Field(default="[]", nullable=False)
 
     threads: list["ChatThread"] = Relationship(
         back_populates="bot", sa_relationship_kwargs={"cascade": "all, delete-orphan"}
     )
+
+
+class GlobalSkill(SQLModel, table=True):
+    """Global library of skills, reusable across bots. See spec §4.1.
+
+    Pattern: one row per skill. Bot.skill_ids is a JSON list[int]
+    pointing at row IDs (parity with how ``Bot.categories`` works for
+    the category registry). The skill content (``instruction``) is the
+    markdown prompt that gets injected into the bot's system message
+    via the orchestrator's ``_build_skills_block`` helper.
+
+    Identity:
+    - ``name`` is the unique human-readable handle. Operators see it in
+      Library cards and in the LLM debug modal. Empty / whitespace
+      names are rejected at the service layer.
+    - ``description`` is the 1-2 line summary shown in the catalog
+      catalog AND embedded in the LLM's ``<Skills>...</Skills>`` block.
+      Longer details go into ``instruction``.
+    - ``instruction`` is the full markdown — only shown in Library
+      preview, not in the per-bot catalog (catalog uses description
+      to save prompt tokens).
+    - ``tags`` is JSON-encoded list[str] for client-side filtering.
+    """
+
+    __tablename__ = "global_skills"
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(nullable=False, unique=True, index=True)
+    description: str = Field(nullable=False, default="")
+    instruction: str = Field(nullable=False)
+    tags: str = Field(default="[]", nullable=False)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class BotVersion(SQLModel, table=True):
