@@ -1,3 +1,4 @@
+import { render } from '@testing-library/svelte';
 /**
  * SkillPicker — vitest unit tests.
  *
@@ -5,8 +6,6 @@
  * and attachedIds via props, then assert onchange semantics.
  */
 import { describe, expect, it, vi } from 'vitest';
-
-import { render } from '@testing-library/svelte';
 
 import type { SkillDTO } from '../api';
 

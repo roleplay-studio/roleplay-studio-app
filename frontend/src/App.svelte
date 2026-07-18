@@ -19,6 +19,7 @@
   import PersonasPage from './lib/pages/PersonasPage.svelte';
   import SettingsPage from './lib/pages/SettingsPage.svelte';
   import SetupWizard from './lib/pages/SetupWizard.svelte';
+  import SkillsLibraryPage from './lib/pages/SkillsLibraryPage.svelte';
   import Sidebar from './lib/Sidebar.svelte';
   import SplashScreen from './lib/SplashScreen.svelte';
   import { isMobile, sidebarOpen } from './lib/stores/sidebar';
@@ -390,6 +391,8 @@
           <BotsPage />
         {:else if baseRoute === '/personas'}
           <PersonasPage />
+        {:else if baseRoute === '/skills'}
+          <SkillsLibraryPage />
         {:else if baseRoute === '/ui-kit'}
           <UIPreview />
         {:else if baseRoute === '/setup'}

@@ -13,9 +13,9 @@
   } from '../api';
   import AvatarUpload from '../AvatarUpload.svelte';
   import CategoryPicker from '../CategoryPicker.svelte';
-  import SkillPicker from '../SkillPicker.svelte';
   import { currentLang, t } from '../i18n';
   import MarkdownRenderer from '../MarkdownRenderer.svelte';
+  import SkillPicker from '../SkillPicker.svelte';
   import { Input, Loading, Select, Tabs, Textarea } from '../ui';
   import { renderIcon } from '../ui/iconMap';
   import VersionsTimeline from '../ui/VersionsTimeline.svelte';
