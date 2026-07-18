@@ -1,6 +1,7 @@
 """Chat service — orchestrates conversation generation with context, memory, persona, and branching support."""
 
 import asyncio
+import json
 import logging
 import uuid as uuid_lib
 from collections.abc import AsyncGenerator
@@ -13,6 +14,7 @@ from app.application.dto import (
     LLMDebugInfo,
     MessageDTO,
     SendMessageCommand,
+    SkillDTO,
 )
 from app.application.exceptions import ExternalServiceError, NotFoundError
 from app.application.ports import (
@@ -27,6 +29,7 @@ from app.application.ports import (
     ThreadRepository,
 )
 from app.application.services.message_summarizer import MessageSummarizer
+from app.application.services.skill import SkillService
 from app.domain.enums import BotType
 from app.infrastructure.config import Settings
 
@@ -100,6 +103,7 @@ class ChatService:
         files: ThreadFileRepository | None = None,
         summarizer: MessageSummarizer | None = None,
         markdown_repairer: MarkdownRepairer | None = None,
+        skill_service: SkillService | None = None,
     ):
         self._bots = bots
         self._messages = messages
@@ -125,6 +129,11 @@ class ChatService:
         # the pre-fix behaviour for tests that don't bother wiring
         # two providers).
         self._llm = llm
+        # Optional — skills resolution happens in ``_build_request``.
+        # When ``None``, bots that reference skills get an empty list
+        # and the orchestrator skips the <Skills> block. Bootstrap
+        # passes the global SkillService (Phase 2 / Task 12).
+        self._skill_service = skill_service
         self._fast_llm: LLMPort | None = fast_llm
         self._files = files
         self._summarizer = summarizer
@@ -1585,6 +1594,29 @@ class ChatService:
                 prev_world_state = candidate
                 break
 
+        # Resolve Bot.skill_ids → SkillDTO list for the orchestrator.
+        # Defensive against:
+        # 1. Missing skill_service (older bootstrap path) → empty list
+        # 2. Corrupted Bot.skill_ids (hand-edited DB) → log + empty
+        # 3. Orphan IDs (skill was deleted but bot.skill_ids still
+        #    references it) → silently dropped by the service.
+        # The orchestrator treats an empty list as "no <Skills> block"
+        # — see ``_build_skills_block`` returning None. See spec §7.3.
+        skills: list[SkillDTO] = []
+        try:
+            raw_skill_ids = getattr(bot, "skill_ids", "[]") or "[]"
+            bot_skill_ids = json.loads(raw_skill_ids)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning(
+                "[chat-build] bot %s has malformed skill_ids=%r; "
+                "treating as empty",
+                command.bot_id,
+                getattr(bot, "skill_ids", None),
+            )
+            bot_skill_ids = []
+        if bot_skill_ids and self._skill_service is not None:
+            skills = await self._skill_service.list_for_bot_with_ids(bot_skill_ids)
+
         return ConversationRequest(
             thread_id=command.thread_id,
             bot_id=command.bot_id,
@@ -1618,6 +1650,10 @@ class ChatService:
                 getattr(bot, "world_state_prompt", "") or "" if bot_type == BotType.RP else ""
             ),
             prev_world_state=(prev_world_state if bot_type == BotType.RP else ""),
+            # Resolved SkillDTO list for the orchestrator's <Skills> block.
+            # Empty when bot has no attached skills OR no skill_service
+            # wired (graceful degradation). See Phase 4 / Task 11.
+            skills=skills,
         )
 
     # ── Section 8: Branch-aware deletion helpers ─────────────────────

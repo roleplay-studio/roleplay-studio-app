@@ -165,6 +165,11 @@ def build_container(settings: Settings | None = None) -> ApplicationContainer:
             files=files_repo,
             summarizer=summarizer,
             markdown_repairer=markdown_repairer,
+            # Phase 4 / Task 12: wire the global SkillService so
+            # ``_build_request`` can resolve Bot.skill_ids → SkillDTO
+            # for the orchestrator's <Skills> catalog. Same instance
+            # the /api/skills routes use — single source of truth.
+            skill_service=skill_svc,
         )
         if orchestrator
         else None,
