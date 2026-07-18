@@ -85,6 +85,15 @@ class BotResponse(BaseModel):
     # deserialise cleanly.
     dynamic_system_prompt: str = ""
     world_state_prompt: str = ""
+    # Attached skills (Phase 2 / Task 13). Stored as a JSON list of
+    # skill IDs in ``Bot.skill_ids``. The API exposes just the IDs
+    # here (slim — no instruction payload); the frontend calls
+    # ``GET /api/bots/{id}/skills`` separately when it needs the
+    # full SkillDTO list. ``skills_invalid`` lists IDs that no
+    # longer resolve to a live GlobalSkill — frontend can offer a
+    # "remove orphan" shortcut, mirroring the categories pattern.
+    skills: list[int] = Field(default_factory=list)
+    skills_invalid: list[int] = Field(default_factory=list)
 
     @classmethod
     def from_orm_bot(
@@ -92,6 +101,7 @@ class BotResponse(BaseModel):
         bot: Bot,
         thread_count: int = 0,
         valid_categories: set[str] | None = None,
+        valid_skill_ids: set[int] | None = None,
     ) -> BotResponse:
         """Build an API response from a SQLModel Bot instance.
 
@@ -102,6 +112,13 @@ class BotResponse(BaseModel):
         unchanged). When ``None`` (e.g. legacy test fixtures),
         ``categories_invalid`` defaults to empty so the existing
         contract is preserved.
+
+        ``valid_skill_ids`` follows the same pattern for the Skills
+        feature. When supplied, every entry in ``bot.skill_ids`` is
+        cross-referenced against the live GlobalSkill library and
+        orphan IDs land in ``skills_invalid``. The raw list goes
+        straight into ``skills`` regardless (preserves the on-disk
+        history). When ``None``, ``skills_invalid`` is empty.
         """
         cats: list[str] = []
         if isinstance(bot.categories, str):
@@ -128,6 +145,24 @@ class BotResponse(BaseModel):
         if valid_categories is not None and cats:
             invalid = [c for c in cats if c not in valid_categories]
 
+        # Phase 2 / Task 13 — skills projection.
+        # Mirrors the categories block above: defensive JSON parse,
+        # cross-reference against valid_skill_ids, raw list preserved.
+        skill_ids: list[int] = []
+        skill_ids_raw = getattr(bot, "skill_ids", "[]") or "[]"
+        if isinstance(skill_ids_raw, list):
+            skill_ids = [int(i) for i in skill_ids_raw if isinstance(i, (int, float))]
+        elif isinstance(skill_ids_raw, str):
+            try:
+                parsed = json.loads(skill_ids_raw)
+                if isinstance(parsed, list):
+                    skill_ids = [int(i) for i in parsed if isinstance(i, (int, float))]
+            except (json.JSONDecodeError, TypeError):
+                skill_ids = []
+        skills_invalid: list[int] = []
+        if valid_skill_ids is not None and skill_ids:
+            skills_invalid = [i for i in skill_ids if i not in valid_skill_ids]
+
         return cls(
             id=bot.id,
             name=bot.name,
@@ -144,6 +179,8 @@ class BotResponse(BaseModel):
             mes_example=getattr(bot, "mes_example", "") or "",
             dynamic_system_prompt=getattr(bot, "dynamic_system_prompt", "") or "",
             world_state_prompt=getattr(bot, "world_state_prompt", "") or "",
+            skills=skill_ids,
+            skills_invalid=skills_invalid,
         )
 
 
