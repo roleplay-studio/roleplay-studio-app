@@ -14,6 +14,7 @@ from app.application.services import (
     MessageSummarizer,
     PersonaService,
     SettingsService,
+    SkillService,
     SummaryService,
     ThreadService,
     TTSService,
@@ -61,6 +62,10 @@ def build_container(settings: Settings | None = None) -> ApplicationContainer:
     bot_version_svc = BotVersionService(bot_version_repo, bot_repo)
     settings_repo = SqlAlchemySettingsRepository(store)
     settings_svc = SettingsService(settings_repo)
+    # Skills — global library + per-bot subscription service. Shares
+    # the same SqlAlchemy store as the rest of the app (no separate
+    # connection pool — one engine per app, see SqlAlchemyStore).
+    skill_svc = SkillService(store=store, settings=settings)
 
     # LLM — created but NOT yet started. ``startup()`` opens the
     # httpx client; the FastAPI lifespan handler in api/main.py calls
@@ -177,6 +182,7 @@ def build_container(settings: Settings | None = None) -> ApplicationContainer:
         markdown_repairer=markdown_repairer,
         settings=settings_svc,
         tts=tts_service,
+        skills=skill_svc,
     )
 
 

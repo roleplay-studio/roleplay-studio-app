@@ -12,6 +12,7 @@ from app.application.services import (
     MessageSummarizer,
     PersonaService,
     SettingsService,
+    SkillService,
     SummaryService,
     ThreadService,
     TTSService,
@@ -56,3 +57,8 @@ class ApplicationContainer:
     # provider's startup/close lifecycle so the lifespan handler
     # can wire it up alongside the chat LLM.
     tts: TTSService | None = None
+    # Skills service — global library + per-bot subscription management.
+    # Required for the /api/skills and /api/bots/{id}/skills endpoints
+    # to work. ``None`` until ``build_container`` instantiates it, so
+    # tests that build the dataclass manually don't need to wire it.
+    skills: SkillService | None = None
