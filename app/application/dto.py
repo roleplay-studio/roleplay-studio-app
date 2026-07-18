@@ -13,7 +13,7 @@ import typing
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.domain.enums import BotType
 
@@ -523,3 +523,148 @@ class BotVersionDTO(BaseModel):
     source: Literal["manual", "auto"] = "manual"
     created_at: datetime
     snapshot: dict[str, object] | None = None
+
+
+# ── Skills (Phase 2) ─────────────────────────────────────────────
+#
+# DTOs for the Skills feature. See spec §5.1, §5.2, §5.3.
+#
+# Pattern: ``*Command`` = inbound (POST/PUT body), ``*DTO`` = outbound
+# (response shape). ``BotSkillDTO`` is the lightweight projection of
+# ``SkillDTO`` used by ``BotResponse.skills`` — NO ``instruction`` to
+# keep ``GET /api/bots`` payload small.
+
+
+class SkillDTO(BaseModel):
+    """API response for a single :class:`GlobalSkill`. See spec §5.1.
+
+    Used by:
+    - ``GET /api/skills/{id}``
+    - ``GET /api/skills`` (list)
+    - ``GET /api/bots/{bot_id}/skills`` (resolved list)
+    - ``ConversationRequest.skills`` (orchestrator input)
+    """
+
+    id: int
+    name: str
+    description: str
+    instruction: str
+    tags: list[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class CreateSkillCommand(BaseModel):
+    """``POST /api/skills`` body. See spec §5.1.
+
+    Validation:
+    - ``name`` — stripped of whitespace; non-empty after trim; ≤64 chars
+    - ``description`` — ≤300 chars (optional)
+    - ``instruction`` — non-empty; ≤4000 chars (caps prompt cost)
+    - ``tags`` — lowercased + stripped + deduped (insertion order kept)
+    """
+
+    name: str = Field(min_length=1, max_length=64)
+    description: str = Field(default="", max_length=300)
+    instruction: str = Field(min_length=1, max_length=4000)
+    tags: list[str] = Field(default_factory=list)
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("name must be non-empty after trim")
+        return v
+
+    @field_validator("tags")
+    @classmethod
+    def _normalize_tags(cls, v: list[str]) -> list[str]:
+        """Lowercase, strip, dedupe. Preserve insertion order.
+
+        Matches :meth:`SqlAlchemySkillRepository._normalise_tags` —
+        single source of truth for tag canonicalisation.
+        """
+        seen: set[str] = set()
+        out: list[str] = []
+        for t in v:
+            t = t.strip().lower()
+            if t and t not in seen:
+                seen.add(t)
+                out.append(t)
+        return out
+
+
+class UpdateSkillCommand(BaseModel):
+    """``PUT /api/skills/{id}`` body. All fields optional.
+
+    Only the supplied fields are touched by the service layer; ``None``
+    means "leave unchanged" (parity with other Update*Command shapes
+    in this module — see ``UpdatePersonaCommand``).
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=64)
+    description: str | None = Field(default=None, max_length=300)
+    instruction: str | None = Field(default=None, min_length=1, max_length=4000)
+    tags: list[str] | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            raise ValueError("name must be non-empty after trim")
+        return v
+
+    @field_validator("tags")
+    @classmethod
+    def _normalize_tags(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        seen: set[str] = set()
+        out: list[str] = []
+        for t in v:
+            t = t.strip().lower()
+            if t and t not in seen:
+                seen.add(t)
+                out.append(t)
+        return out
+
+
+class BotSkillDTO(BaseModel):
+    """Lightweight skill projection for ``BotResponse.skills``. See spec §5.3.
+
+    Excludes ``instruction`` (large markdown blob) to keep
+    ``GET /api/bots`` payload small. Full content is available via
+    ``GET /api/skills/{id}`` for the Library preview modal.
+
+    Includes ``description`` because the chips in the BotEditPage
+    Skills section use it as a tooltip on hover.
+    """
+
+    id: int
+    name: str
+    description: str
+
+
+class UpdateBotSkillsCommand(BaseModel):
+    """``PUT /api/bots/{bot_id}/skills`` body. See spec §5.2.
+
+    Replaces the bot's entire skill list (not a delta). Empty list =
+    clear all skills.
+    """
+
+    skill_ids: list[int] = Field(default_factory=list)
+
+
+class ConflictErrorResponse(BaseModel):
+    """409 response body for skill-deletion conflicts. See spec §6.4.
+
+    Stable shape — the frontend reads ``attached_to`` to render
+    "used by N bots" and offers navigation to the affected bots.
+    """
+
+    detail: str
+    attached_to: list[int] = Field(default_factory=list)
