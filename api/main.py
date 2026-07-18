@@ -21,11 +21,13 @@ from api.routes import (
     personas,
     server_info,
     setup,
+    skills,
     threads,
     tts,
 )
 from app.application.exceptions import (
     ApplicationError,
+    ConflictError,
     ExternalServiceError,
     NotFoundError,
     UploadError,
@@ -152,6 +154,7 @@ def create_app() -> FastAPI:
 
     # ── Routers ──────────────────────────────────────────────────
     app.include_router(bots.router, prefix="/api/bots", tags=["Bots"])
+    app.include_router(skills.router, prefix="/api/skills", tags=["Skills"])
     app.include_router(threads.router, prefix="/api/threads", tags=["Threads"])
     app.include_router(chat.router, prefix="/api/threads", tags=["Chat"])
     app.include_router(files.router, prefix="/api/threads", tags=["Files"])
@@ -274,6 +277,12 @@ def create_app() -> FastAPI:
             status_code = exc.http_status
         elif isinstance(exc, ValidationError):
             status_code = exc.http_status
+        elif isinstance(exc, ConflictError):
+            # Skills feature: deleting a skill that's still attached to
+            # one or more bots. Carries http_status=409 + attached_to list
+            # so the frontend can show "used by N bots" and offer
+            # navigation to the affected bots. See spec §6.4.
+            status_code = exc.http_status
         elif isinstance(exc, ExternalServiceError):
             status_code = status.HTTP_502_BAD_GATEWAY
         else:
@@ -306,6 +315,13 @@ def create_app() -> FastAPI:
         code = getattr(exc, "code", None)
         if code is not None:
             body["code"] = code
+        # ConflictError carries ``attached_to`` (list of bot IDs using
+        # the skill) so the frontend can surface "used by N bots" and
+        # navigate to the affected bots. Optional — only set when the
+        # attribute is present and non-None. See spec §6.4.
+        attached_to = getattr(exc, "attached_to", None)
+        if attached_to is not None:
+            body["attached_to"] = attached_to
         return JSONResponse(body, status_code=status_code)
 
     return app

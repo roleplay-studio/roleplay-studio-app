@@ -27,10 +27,13 @@ from api.upload_utils import read_upload_file_limited, save_upload_file_limited
 from app.application.dto import (
     AddKnowledgeEntryCommand,
     BotResponse,
+    BotSkillDTO,
     BotVersionDTO,
     CreateBotCommand,
+    SkillDTO,
     ThreadDTO,
     UpdateBotCommand,
+    UpdateBotSkillsCommand,
 )
 from app.application.exceptions import NotFoundError
 from app.application.services.bot_version import to_dto
@@ -562,3 +565,59 @@ async def import_chat(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
 
     return {"ok": True, "thread_id": result.thread_id, "message_count": result.message_count}
+
+
+# ── Per-bot skills: /api/bots/{bot_id}/skills ──────────────────
+
+
+@router.get("/{bot_id}/skills", response_model=list[SkillDTO])
+async def list_bot_skills(bot_id: int, container: ContainerDep):
+    """List the resolved skills attached to a bot.
+
+    Returns the full ``SkillDTO`` (with ``instruction``) for each
+    attached skill, in id-ASC order. Orphan IDs (where the underlying
+    ``GlobalSkill`` was deleted) are silently skipped (see spec §6.2).
+    """
+    if container.skills is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Skills service unavailable",
+        )
+    # Verify bot exists first — the service-level resolve returns
+    # empty for unknown bots which would otherwise silently 200 with [].
+    bot = await container.bots.get_bot(bot_id)
+    if bot is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Bot {bot_id} not found"
+        )
+    import json as _json
+
+    skill_ids = _json.loads(getattr(bot, "skill_ids", "[]") or "[]")
+    return await container.skills.list_for_bot_with_ids(skill_ids)
+
+
+@router.put("/{bot_id}/skills")
+async def update_bot_skills(
+    bot_id: int,
+    body: UpdateBotSkillsCommand,
+    container: ContainerDep,
+) -> dict:
+    """Replace the bot's skill list with the supplied IDs.
+
+    Returns the resolved ``BotSkillDTO`` list (without ``instruction``)
+    so the frontend can update the chips without a second round-trip.
+    Validation (limit, existence) lives in the service layer.
+    """
+    if container.skills is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Skills service unavailable",
+        )
+    skills = await container.skills.update_bot_skills(bot_id, body.skill_ids)
+    return {
+        "ok": True,
+        "skills": [
+            BotSkillDTO(id=s.id, name=s.name, description=s.description)
+            for s in skills
+        ],
+    }
