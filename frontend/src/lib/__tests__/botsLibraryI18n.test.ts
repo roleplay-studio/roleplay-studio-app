@@ -90,3 +90,40 @@ describe('bot_library i18n contract', () => {
     expect(t('bot_library.sort_label', 'zh')).toBe('Sort by');
   });
 });
+
+describe('bot_create.personality type-aware labels', () => {
+  // The "personality" field's UI label is the character-card
+  // convention ("Характер" / "Personality") for RP bots, but for
+  // assistant / agent the same field semantically IS the system
+  // prompt — so we relabel it conditionally. Backend DTO stays
+  // ``personality`` (semantically stable); only the label flips.
+  it('keeps the RP label for rp bots', () => {
+    expect(t('bot_create.personality', 'en')).toBe('Personality');
+    expect(t('bot_create.personality', 'ru')).toBe('Характер');
+  });
+
+  it('exposes a non-RP label for assistant / agent types', () => {
+    expect(t('bot_create.personality_label_non_rp', 'en')).toBe('System prompt');
+    expect(t('bot_create.personality_label_non_rp', 'ru')).toBe('Системный промпт');
+  });
+
+  it('exposes a non-RP hint that explains the system-prompt semantics', () => {
+    // The hint is what tells the user this is the place for
+    // "be a helpful X" instructions, not character flavor.
+    const en = t('bot_create.personality_hint_non_rp', 'en');
+    const ru = t('bot_create.personality_hint_non_rp', 'ru');
+    expect(en.length).toBeGreaterThan(20);
+    expect(ru.length).toBeGreaterThan(20);
+    // Sanity: no character-card jargon leaking into the non-RP copy.
+    expect(en.toLowerCase()).not.toContain('character');
+    expect(ru.toLowerCase()).not.toContain('характер');
+    expect(ru.toLowerCase()).not.toContain('персонаж');
+  });
+
+  it('falls back to English for locales without a non-RP label override', () => {
+    // Same fallback contract as bot_library.* — see i18n.ts:4099.
+    expect(t('bot_create.personality_label_non_rp', 'de')).toBe('System prompt');
+    expect(t('bot_create.personality_label_non_rp', 'ja')).toBe('System prompt');
+    expect(t('bot_create.personality_label_non_rp', 'zh')).toBe('System prompt');
+  });
+});

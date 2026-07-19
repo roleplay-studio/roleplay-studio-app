@@ -210,13 +210,21 @@
         />
       </div>
 
-      <!-- Personality -->
+      <!-- Personality — relabeled "System prompt" for assistant / agent
+           types (the same field semantically IS the system prompt
+           outside of character-card conventions). Required for all
+           types. Backend DTO stays ``personality``. -->
       <div class="field-group">
         <label class="field-label"
-          >{t('bot_create.personality', lang)} <span class="required">*</span></label
+          >{formBotType === 'rp'
+            ? t('bot_create.personality', lang)
+            : t('bot_create.personality_label_non_rp', lang)} <span class="required">*</span></label
         >
         <Textarea
           bind:value={formPersonality}
+          hint={formBotType === 'rp'
+            ? undefined
+            : t('bot_create.personality_hint_non_rp', lang)}
           required
           rows={5}
           placeholder={t('bot_create.personality_placeholder', lang)}

@@ -628,6 +628,9 @@ const dict: LangDict = Object.freeze({
     'bot_create.first_message_placeholder': 'The first message the bot sends...',
     'bot_create.name_placeholder': 'Assistant Bot',
     'bot_create.personality': 'Personality',
+    'bot_create.personality_hint_non_rp':
+      'Tells the model how to behave. Be specific about tone, scope, and constraints — the model will follow this verbatim.',
+    'bot_create.personality_label_non_rp': 'System prompt',
     'bot_create.personality_placeholder': "Describe the bot's personality...",
     'bot_create.required': 'required',
     'bot_create.scenario': 'Scenario',
@@ -2973,6 +2976,9 @@ const dict: LangDict = Object.freeze({
     'bot_create.first_message_placeholder': 'Первое сообщение, которое отправит бот...',
     'bot_create.name_placeholder': 'Бот-помощник',
     'bot_create.personality': 'Характер',
+    'bot_create.personality_hint_non_rp':
+      'Описывает, как модель должна себя вести. Укажите тон, область применения и ограничения — модель следует этому дословно.',
+    'bot_create.personality_label_non_rp': 'Системный промпт',
     'bot_create.personality_placeholder': 'Опишите характер бота...',
     'bot_create.required': 'обязательно',
     'bot_create.scenario': 'Мир (сценарий)',
