@@ -12,11 +12,12 @@
     type SkillDTO,
   } from '../api';
   import AvatarUpload from '../AvatarUpload.svelte';
+  import { hasHiddenRPContent } from '../botEditor';
   import CategoryPicker from '../CategoryPicker.svelte';
   import { currentLang, t } from '../i18n';
   import MarkdownRenderer from '../MarkdownRenderer.svelte';
   import SkillPicker from '../SkillPicker.svelte';
-  import { Input, Loading, Select, Tabs, Textarea } from '../ui';
+  import { Input, Loading, Modal, Select, Tabs, Textarea } from '../ui';
   import { renderIcon } from '../ui/iconMap';
   import VersionsTimeline from '../ui/VersionsTimeline.svelte';
   import {
@@ -410,6 +411,62 @@
   function goBack() {
     window.location.hash = '#/bots';
   }
+
+  // ── Type-switch confirmation (improve-bot-editor Phase 2) ────────
+  //
+  // See ``specs/bot-editor-type-aware/spec.md`` §Requirement: Type
+  // switch with unsaved changes. The bot-type <Select> emits the new
+  // value through ``onchange`` BEFORE the bind:value write completes
+  // (Select was extended to pass the new value as the first arg).
+  // We intercept that, check whether the change would discard
+  // unsaved RP-only content, and either apply it directly or roll
+  // back + open the modal.
+  let pendingBotType: BotType | null = $state(null);
+
+  function handleBotTypeSelect(newValue: string) {
+    const next = newValue as BotType;
+    const prev = formBotType;
+    if (next === prev) return;
+
+    if (
+      hasHiddenRPContent(prev, {
+        alternate_greetings: formGreetings,
+        dynamic_system_prompt: formDynamicSystemPrompt,
+        first_message: formGreetings[0] ?? '',
+        mes_example: formMesExample,
+        world_state_prompt: formWorldStatePrompt,
+      })
+    ) {
+      formBotType = prev;
+      pendingBotType = next;
+      return;
+    }
+    formBotType = next;
+  }
+
+  function confirmBotTypeSwitch() {
+    if (pendingBotType === null) return;
+    formBotType = pendingBotType;
+    // Clear RP-only fields so the form reflects what the backend
+    // will actually persist.
+    formGreetings = [''];
+    activeGreetingIndex = 0;
+    formScenario = '';
+    formMesExample = '';
+    formWorldStatePrompt = '';
+    // TODO(for-assistant): also reset ``mesExampleOpen = false`` and
+    // any other mes_example editor state on confirm. Today the
+    // mes_example section is NOT wrapped in ``{#if formBotType === 'rp'}``
+    // (see Phase 4 of the change), so the editor can stay visibly
+    // "open" while the form value is empty — minor visual
+    // inconsistency, not a data-loss bug. Punted to v2 with the
+    // mes_example wrapping.
+    pendingBotType = null;
+  }
+
+  function cancelBotTypeSwitch() {
+    pendingBotType = null;
+  }
 </script>
 
 <div class="bot-edit-page">
@@ -508,12 +565,14 @@
     {#if activeTab === 'edit'}
       <section class="edit-section">
         <div class="ray-card">
-          <!-- Bot Type -->
+          <!-- Bot Type — type-switch confirm gated through handleBotTypeSelect.
+               See ``botEditor.ts::hasHiddenRPContent`` for the rule. -->
           <div class="field-group">
             <label class="field-label">{t('bot_create.bot_type', lang)}</label>
             <Select
               bind:value={formBotType}
               options={BOT_TYPES.map((bt) => ({ label: bt.label, value: bt.value }))}
+              onchange={handleBotTypeSelect}
             />
           </div>
 
@@ -558,18 +617,22 @@
             />
           </div>
 
-          <!-- Scenario -->
-          <div class="field-group">
-            <label class="field-label">{t('bot_create.scenario', lang)}</label>
-            <Textarea
-              bind:value={formScenario}
-              hint={t('bot_edit.scenario_hint', lang)}
-              rows={6}
-              placeholder={t('bot_edit.scenario_placeholder', lang)}
-            />
-          </div>
+          <!-- Scenario — RP-only (hidden for assistant / agent types). -->
+          {#if formBotType === 'rp'}
+            <div class="field-group">
+              <label class="field-label">{t('bot_create.scenario', lang)}</label>
+              <Textarea
+                bind:value={formScenario}
+                hint={t('bot_edit.scenario_hint', lang)}
+                rows={6}
+                placeholder={t('bot_edit.scenario_placeholder', lang)}
+              />
+            </div>
+          {/if}
 
-          <!-- Greetings — unified tab list (index 0 = first message) -->
+          <!-- Greetings — unified tab list (index 0 = first message).
+               RP-only: hidden for assistant / agent types. -->
+          {#if formBotType === 'rp'}
           <div class="field-group">
             <div class="greetings-header">
               <label class="field-label">{t('bot_edit.greetings', lang)}</label>
@@ -683,6 +746,7 @@
               {/if}
             </div>
           </div>
+          {/if}
 
           <!-- Categories -->
           <div class="field-group">
@@ -1106,16 +1170,38 @@
           <!-- World-state prompt — system prompt for the background
                task that updates Conversation.state. The bot author
                owns the output format (YAML, JSON, prose). Empty
-               string = no background state generation. -->
-          <div class="field-group">
-            <label class="field-label">{t('bot_edit.world_state_prompt', lang)}</label>
-            <Textarea
-              bind:value={formWorldStatePrompt}
-              rows={6}
-              placeholder="e.g. Emit a YAML block with keys: location, time_of_day, present_characters."
-            />
-          </div>
+               string = no background state generation.
+               RP-only — hidden for assistant / agent types. -->
+          {#if formBotType === 'rp'}
+            <div class="field-group">
+              <label class="field-label">{t('bot_edit.world_state_prompt', lang)}</label>
+              <Textarea
+                bind:value={formWorldStatePrompt}
+                rows={6}
+                placeholder="e.g. Emit a YAML block with keys: location, time_of_day, present_characters."
+              />
+            </div>
+          {/if}
         </div>
+
+        <!-- Type-switch confirmation modal (improve-bot-editor Phase 2).
+             Opens when the user picks a non-RP bot_type while RP-only
+             fields have unsaved content. -->
+        <Modal
+          open={pendingBotType !== null}
+          title={t('bot_edit.confirm_type_switch.title', lang)}
+          onclose={cancelBotTypeSwitch}
+        >
+          <p class="modal-body">{t('bot_edit.confirm_type_switch.body', lang)}</p>
+          <div class="modal-actions">
+            <button class="ray-btn" onclick={cancelBotTypeSwitch}>
+              {t('bot_edit.confirm_type_switch.cancel', lang)}
+            </button>
+            <button class="ray-btn primary" onclick={confirmBotTypeSwitch}>
+              {t('bot_edit.confirm_type_switch.confirm', lang)}
+            </button>
+          </div>
+        </Modal>
       </section>
     {:else if activeTab === 'versions'}
       <section class="edit-section">

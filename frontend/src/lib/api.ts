@@ -535,14 +535,18 @@ export const api = {
   // Config
   config: () => request<AppConfig>('/api/config'),
   createBot: (data: {
+    alternate_greetings?: string[];
     avatar_path?: null | string;
     bot_type?: BotType;
     categories?: string[];
     description?: string;
+    dynamic_system_prompt?: string;
     first_message: string;
+    mes_example?: string;
     name: string;
     personality: string;
     scenario?: string;
+    world_state_prompt?: string;
   }) => request<{ id: number }>('/api/bots', { body: JSON.stringify(data), method: 'POST' }),
   createBotVersion: (botId: number, note: string) =>
     request<BotVersion>(`/api/bots/${botId}/versions`, {

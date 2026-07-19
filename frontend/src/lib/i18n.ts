@@ -616,6 +616,11 @@ const dict: LangDict = Object.freeze({
     'bot_create.bot_name': 'Bot Name',
     'bot_create.bot_type': 'Bot Type',
     'bot_create.description': 'Description',
+    'bot_edit.confirm_type_switch.body':
+      'Switching to a non-RolePlay type will hide the following fields and discard any unsaved content in them: first message, alternate greetings, scenario, example dialogues, world-state prompt.',
+    'bot_edit.confirm_type_switch.cancel': 'Cancel',
+    'bot_edit.confirm_type_switch.confirm': 'Switch type',
+    'bot_edit.confirm_type_switch.title': 'Discard RolePlay-only fields?',
     'bot_create.description_hint': 'Short summary shown in cards',
     'bot_create.description_placeholder': 'A cheerful catgirl who loves anime and tech...',
     'bot_create.first_message': 'First Message',
@@ -2955,6 +2960,11 @@ const dict: LangDict = Object.freeze({
     'app.title': 'Roleplay Studio',
     'bot_create.bot_name': 'Имя бота',
     'bot_create.bot_type': 'Тип бота',
+    'bot_edit.confirm_type_switch.body':
+      'При смене типа на не-RolePlay следующие поля будут скрыты, а их несохранённое содержимое — удалено: первое сообщение, дополнительные приветствия, сценарий, примеры диалогов, промпт состояния мира.',
+    'bot_edit.confirm_type_switch.cancel': 'Отмена',
+    'bot_edit.confirm_type_switch.confirm': 'Сменить тип',
+    'bot_edit.confirm_type_switch.title': 'Удалить поля RolePlay?',
     'bot_create.description': 'Описание',
     'bot_create.description_hint': 'Краткое описание для карточки',
     'bot_create.description_placeholder': 'Весёлая кошкодевочка, любит аниме и технологии...',
