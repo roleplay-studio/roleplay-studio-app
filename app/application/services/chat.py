@@ -36,6 +36,58 @@ from app.infrastructure.config import Settings
 logger = logging.getLogger(__name__)
 
 
+def _format_exception_detail(exc: BaseException) -> str:
+    """Render an exception as a user-visible detail string.
+
+    Mirrors ``api.routes.chat._describe_error`` — the same type +
+    ``__cause__`` walking logic, plus a short ``request_id`` so the
+    user can quote it in a support ticket and we can grep the
+    backend log for the matching traceback.
+
+    The ``request_id`` is generated per-call (NOT pulled from a
+    contextvar) because the application layer doesn't have access
+    to the HTTP request scope. The chat.py raise site calls this
+    once per failure; the route layer adds the SAME id to the
+    response body so both sides can cross-reference. The id is
+    also logged at the raise site, so a grep on the id surfaces
+    both the service-level exception and the route-level handler
+    line.
+
+    Walk the cause chain to surface the underlying ``OSError``
+    (which still carries ``[Errno N] reason`` on POSIX) and the
+    configured ``LLM_BASE_URL`` so the chat UI can sanity-check
+    the configured endpoint from the alert alone.
+    """
+    type_name = type(exc).__name__
+    parts: list[str] = [type_name, str(exc) or repr(exc)]
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if isinstance(cur, OSError) and cur is not exc:
+            parts.append(f"({type(cur).__name__}: {cur})")
+            break
+        cur = cur.__cause__ or cur.__context__
+
+    detail = ": ".join(parts)
+    try:
+        from app.infrastructure.config import Settings
+
+        base = Settings.from_env().llm_base_url
+        if base:
+            detail = f"{detail} (target: {base})"
+    except Exception:
+        pass
+
+    # Short id (8 hex chars) is plenty for cross-referencing logs.
+    # 32 bits of entropy is overkill for log correlation but cheap
+    # to generate. We use uuid4 because stdlib uuid is already
+    # imported (line 6) — no new dependency.
+    request_id = uuid_lib.uuid4().hex[:8]
+    detail = f"{detail} [ref: {request_id}]"
+    return detail
+
+
 class _NullMarkdownRepairer:
     """No-op fallback so ChatService can be constructed in tests
     without wiring a real repairer.
@@ -378,7 +430,7 @@ class ChatService:
             # we don't have here. See docs/review.md m4 for the
             # full discussion.
             logger.exception("Streaming chat generation failed")
-            raise ExternalServiceError("Failed to generate assistant response") from exc
+            raise ExternalServiceError(_format_exception_detail(exc)) from exc
 
         response = "".join(content_chunks)
         full_reasoning = "".join(reasoning_chunks)
@@ -1296,7 +1348,7 @@ class ChatService:
                 )
             yield {"type": "stopped"}
             return
-        except Exception:
+        except Exception as exc:
             # m5: any failure → yield a structured error event
             # so the frontend can surface it. Broad catch because
             # the LLM stream path can fail in many ways (httpx
@@ -1305,7 +1357,7 @@ class ChatService:
             # by the explicit ``except CancelledError:`` block above
             # (yields "stopped"), so we don't need to re-raise here.
             logger.exception("Branch regeneration failed")
-            yield {"type": "error", "detail": "Failed to generate assistant response"}
+            yield {"type": "error", "detail": _format_exception_detail(exc)}
             return
 
         response = "".join(content_chunks)
@@ -1438,13 +1490,13 @@ class ChatService:
                 )
             yield {"type": "stopped"}
             return
-        except Exception:
+        except Exception as exc:
             # m5: see _regenerate_message_stream — broad catch
             # because the LLM stream path can fail in many ways.
             # ``CancelledError`` is handled by the explicit branch
             # above.
             logger.exception("Retry message generation failed")
-            yield {"type": "error", "detail": "Failed to generate assistant response"}
+            yield {"type": "error", "detail": _format_exception_detail(exc)}
             return
 
         response = "".join(chunks)

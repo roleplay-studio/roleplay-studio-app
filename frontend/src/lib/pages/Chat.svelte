@@ -1248,6 +1248,11 @@
               } else if (data.type === 'error') {
                 // Server-side error mid-stream — mark as failed so finally
                 // doesn't re-fetch and wipe our error bubble.
+                // Surface the full detail to the browser console for
+                // power users who want to grep the backend log by the
+                // ``[ref: xxxxxxxx]`` token. The chat bubble shows the
+                // same text inline; the console copy is the "open the
+                // hood" path.
                 retryFailed = true;
                 messages = messages.slice(0, -1);
                 messages = [
@@ -1264,6 +1269,7 @@
                   },
                 ];
                 scrollToBottom();
+                console.error('Retry stream error:', data.detail);
               }
             } catch {
               /* ignore */
