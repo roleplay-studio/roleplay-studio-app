@@ -92,6 +92,8 @@ const MarkdownRenderersDemo = (): Promise<{ default: Component }> =>
 const FileAttachmentsDemo = (): Promise<{ default: Component }> =>
   import('../_demos/FileAttachmentsDemo.svelte');
 const BotCardsDemo = (): Promise<{ default: Component }> => import('../_demos/BotCardsDemo.svelte');
+const BotsToolbarDemo = (): Promise<{ default: Component }> =>
+  import('../_demos/BotsToolbarDemo.svelte');
 const BackendErrorScreensDemo = (): Promise<{ default: Component }> =>
   import('../_demos/BackendErrorScreensDemo.svelte');
 const DeleteConfirmModalsDemo = (): Promise<{ default: Component }> =>
@@ -2169,5 +2171,73 @@ export const CATALOG: CatalogEntry[] = [
     ],
     source: 'frontend/src/lib/ui/TTSButton.svelte',
     title: 'TTSButton',
+  },
+  {
+    demo: BotsToolbarDemo,
+    description:
+      'Controlled composite for the Bots library: sort dropdown, type-filter chips, name search. Every value flows in via props; every user input flows out via callbacks. State lives in the parent (BotsPage pattern).',
+    group: 'composite',
+    props: [
+      {
+        description: 'Current sort dimension. One of id / name / thread_count.',
+        name: 'sortKey',
+        required: true,
+        type: "'id' | 'name' | 'thread_count'",
+      },
+      {
+        description: 'Sort direction.',
+        name: 'sortDir',
+        required: true,
+        type: "'asc' | 'desc'",
+      },
+      {
+        description:
+          'Multi-select type filter. Empty array = no filter (logical OR across values).',
+        name: 'activeTypes',
+        required: true,
+        type: "BotType[]",
+      },
+      {
+        description: 'Substring match against name. Empty string = no filter.',
+        name: 'query',
+        required: true,
+        type: 'string',
+      },
+      {
+        description: 'Fires when the user picks a new sort option.',
+        name: 'onsortChange',
+        required: false,
+        type: '(key: BotSortKey, dir: BotSortDir) => void',
+      },
+      {
+        description:
+          'Fires when the user toggles a type chip. The argument is the new selection, in BOT_TYPES catalogue order.',
+        name: 'ontypesChange',
+        required: false,
+        type: '(types: BotType[]) => void',
+      },
+      {
+        description: 'Fires on every keystroke in the search input.',
+        name: 'onqueryChange',
+        required: false,
+        type: '(query: string) => void',
+      },
+    ],
+    slug: 'bots-toolbar',
+    snippets: [
+      {
+        code: `<BotsToolbar
+  activeTypes={activeTypes}
+  onqueryChange={(q) => (query = q)}
+  onsortChange={(k, d) => { sortKey = k; sortDir = d; }}
+  ontypesChange={(t) => (activeTypes = t)}
+  {query} {sortKey} {sortDir}
+/>`,
+        lang: 'svelte',
+        title: 'BotsPage wiring',
+      },
+    ],
+    source: 'frontend/src/lib/BotsToolbar.svelte',
+    title: 'BotsToolbar',
   },
 ];
