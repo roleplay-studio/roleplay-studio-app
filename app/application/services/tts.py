@@ -6,7 +6,7 @@ Layering
   port. Two implementations in ``app.infrastructure``:
 
   * ``MiniMaxTTSProvider`` — production, talks to
-    ``https://api.minimaxi.com/v1/t2a_v2``.
+    ``https://api.minimax.io/v1/t2a_v2``.
   * ``MockTTSProvider`` — returns a deterministic in-process MP3 stub
     for E2E tests and local dev without spending TTS credits.
 

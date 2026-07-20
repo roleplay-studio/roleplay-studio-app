@@ -67,7 +67,7 @@
   // The configured/not-configured status comes through the boolean
   // ``tts_api_key_configured`` field of AppConfig.
   let editTtsProvider = $state<'disabled' | 'minimax' | 'mock'>('disabled');
-  let editTtsBaseUrl = $state('https://api.minimaxi.com/v1');
+  let editTtsBaseUrl = $state('https://api.minimax.io/v1');
   let editTtsVoiceId = $state('Russian_ReliableMan');
   let editTtsModel = $state('speech-02-turbo');
   let editTtsSpeed = $state(1.0);
@@ -1286,7 +1286,7 @@
             {#if editTtsProvider === 'minimax'}
               <div class="field-group">
                 <label class="field-label">Base URL</label>
-                <Input bind:value={editTtsBaseUrl} placeholder="https://api.minimaxi.com/v1" />
+                <Input bind:value={editTtsBaseUrl} placeholder="https://api.minimax.io/v1" />
               </div>
 
               <div class="field-group">

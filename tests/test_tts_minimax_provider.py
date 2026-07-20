@@ -78,7 +78,7 @@ async def test_base_resp_invalid_api_key_surfaces_clear_message(provider: MiniMa
                 "data": {"audio": None, "status": 2049},
             },
         ),
-        base_url="https://api.minimaxi.com/v1",
+        base_url="https://api.minimax.io/v1",
         timeout=httpx.Timeout(10.0),
     )
     # The provider raises a plain RuntimeError; ``TTSService.synthesize``
@@ -110,7 +110,7 @@ async def test_base_resp_success_returns_audio(provider_settings: Settings) -> N
         )
         p._client = httpx.AsyncClient(
             transport=transport,
-            base_url="https://api.minimaxi.com/v1",
+            base_url="https://api.minimax.io/v1",
             timeout=httpx.Timeout(10.0),
         )
         result = await p.synthesize("hi", "Russian_ReliableMan", "speech-02-turbo")

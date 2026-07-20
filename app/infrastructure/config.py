@@ -276,7 +276,7 @@ class Settings(BaseSettings):
 
     # ── TTS (text-to-speech) ───────────────────────────────────────
     # Operator-level switch. ``"minimax"`` hits
-    # ``https://api.minimaxi.com/v1/t2a_v2``; ``"mock"`` swaps in an
+    # ``https://api.minimax.io/v1/t2a_v2``; ``"mock"`` swaps in an
     # in-process deterministic synthesizer (no API call, no cost) for
     # E2E suites and local dev; ``"disabled"`` (default) means the
     # frontend hides the play button entirely — TTS is opt-in.
@@ -287,7 +287,7 @@ class Settings(BaseSettings):
     # LM Studio TTS.
     tts_provider: Literal["disabled", "mock", "minimax"] = "disabled"
     tts_api_key: SecretStr | None = None
-    tts_base_url: str = "https://api.minimaxi.com/v1"
+    tts_base_url: str = "https://api.minimax.io/v1"
     # MiniMax's published voice catalog uses ``<Language>_<Persona>``
     # strings (e.g. ``Russian_ReliableMan``, ``English_Graceful_Lady``,
     # ``German_SweetLady``). ``english_female_1`` is NOT a real id —

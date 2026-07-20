@@ -67,7 +67,7 @@ def test_build_container_with_provider_subclass_minimax_no_network(monkeypatch) 
     llm = container.chat._llm
     assert llm is not None
     # Don't make any HTTPS calls — just inspect the constructed shape.
-    assert llm.base_url == "https://api.minimaxi.com/v1"
+    assert llm.base_url == "https://api.minimax.io/v1"
     # fast_llm is a separate instance with the same provider class.
     assert container.summarizer is not None
     assert type(container.summarizer._llm) is type(llm)
