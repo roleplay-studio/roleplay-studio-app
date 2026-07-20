@@ -31,6 +31,7 @@ from app.application.services.chat import (
     _NullMarkdownRepairer,
     _repair_for_rp,
 )
+from app.infrastructure.config import Settings
 from app.infrastructure.format_standart_rp_repairer import FormatStandartRpRepairer
 
 # ── Unit tests for _repair_for_rp ──────────────────────────────────────
@@ -121,6 +122,23 @@ class TestRepairForRpFilter:
         spy = _SpyRepairer()
         assert _repair_for_rp(spy, "rp", "") == ""
         assert spy.invoked is False
+
+    def test_disabled_formatter_passes_rp_text_through(self) -> None:
+        calls: list[str] = []
+
+        class _SpyRepairer:
+            def repair(self, text: str, mode: str = "close") -> str:
+                calls.append(text)
+                return text + "!"
+
+        out = _repair_for_rp(
+            _SpyRepairer(),
+            "rp",
+            "hello **broken",
+            enabled=False,
+        )
+        assert calls == []
+        assert out == "hello **broken"
 
 
 # ── Infrastructure adapter smoke test ─────────────────────────────────
@@ -356,6 +374,33 @@ async def test_stream_message_assistant_bot_does_not_repair() -> None:
     assert assistant_msgs[0]["content"] == "Он сказал **тихо и улыбнулся"
 
     # Repairer was never called for an assistant bot.
+    assert repairer.calls == []
+
+
+@pytest.mark.asyncio
+async def test_stream_message_does_not_repair_rp_when_formatter_is_disabled() -> None:
+    """Settings toggle disables the formatter for RP responses."""
+    bots = _FakeBotRepo(bot_type="rp")
+    msgs = _FakeMessagesRepo()
+    orch = _FakeOrchestrator(chunks=["Он сказал **тихо и улыбнулся"])
+    repairer = _SpyRepairer()
+
+    service = ChatService(
+        bots,
+        msgs,
+        _FakeKnowledge(),
+        orch,
+        settings=Settings(_env_file=None, format_standart_rp_enabled=False),
+        markdown_repairer=repairer,
+    )
+
+    async for _ in service.stream_message(
+        SendMessageCommand(thread_id=1, bot_id=1, user_input="привет")
+    ):
+        pass
+
+    assistant_msgs = [m for m in msgs.saved if m["role"] == "assistant"]
+    assert assistant_msgs[0]["content"] == "Он сказал **тихо и улыбнулся"
     assert repairer.calls == []
 
 

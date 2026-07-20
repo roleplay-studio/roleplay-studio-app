@@ -96,6 +96,20 @@ class TestDebugEnabled:
         assert settings.debug_enabled is True
 
 
+class TestFormatStandartRpEnabled:
+    """The RP response formatter is enabled by default and configurable."""
+
+    def test_formatter_is_enabled_by_default(self, monkeypatch):
+        monkeypatch.delenv("FORMAT_STANDART_RP_ENABLED", raising=False)
+        settings = Settings(_env_file=None)
+        assert settings.format_standart_rp_enabled is True
+
+    def test_formatter_can_be_disabled_from_env(self, monkeypatch):
+        monkeypatch.setenv("FORMAT_STANDART_RP_ENABLED", "false")
+        settings = Settings(_env_file=None)
+        assert settings.format_standart_rp_enabled is False
+
+
 class TestLlmProviderValidator:
     """Settings.llm_provider accepts any id from api.constants.PROVIDERS + 'mock',
     and silently falls back to 'mock' for unknown ids."""

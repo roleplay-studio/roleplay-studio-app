@@ -413,6 +413,9 @@ const dict: LangDict = Object.freeze({
     'settings.fast_model': 'Schnelles Modell',
     'settings.fast_model_hint':
       'Günstiges Modell für Zusammenfassungen, Speicherkomprimierung und andere leichte Aufgaben',
+    'settings.format_standart_rp_hint':
+      'Repariert unvollständiges Markdown in Antworten von Roleplay-Bots vor dem Speichern.',
+    'settings.format_standart_rp_label': 'Roleplay-Formatierung',
     'settings.generation': 'Generierung & Embeddings',
     'settings.history_limit': 'Verlauf-Limit',
     'settings.history_limit_hint':
@@ -1045,6 +1048,9 @@ const dict: LangDict = Object.freeze({
     'settings.fast_model': 'Fast Model',
     'settings.fast_model_hint':
       'Cheap model for summarization, memory compression, and other lightweight tasks',
+    'settings.format_standart_rp_hint':
+      'Repairs incomplete Markdown in Roleplay bot responses before saving them.',
+    'settings.format_standart_rp_label': 'Roleplay formatting',
     'settings.generation': 'Generation & Embeddings',
     'settings.history_limit': 'History Limit',
     'settings.history_limit_hint':
@@ -1609,6 +1615,9 @@ const dict: LangDict = Object.freeze({
     'settings.fast_model': 'Modèle rapide',
     'settings.fast_model_hint':
       "Modèle économique pour le résumé, la compression de mémoire et d'autres tâches légères",
+    'settings.format_standart_rp_hint':
+      'Répare le Markdown incomplet des réponses des bots Roleplay avant leur enregistrement.',
+    'settings.format_standart_rp_label': 'Formatage Roleplay',
     'settings.generation': 'Génération et embeddings',
     'settings.history_limit': "Limite de l'historique",
     'settings.history_limit_hint':
@@ -2194,6 +2203,8 @@ const dict: LangDict = Object.freeze({
     'settings.failed': '失敗',
     'settings.fast_model': '高速モデル',
     'settings.fast_model_hint': '要約、メモリ圧縮、その他の軽量タスク用の低コストモデル',
+    'settings.format_standart_rp_hint': 'RPボットの応答を保存する前に不完全なMarkdownを修正します。',
+    'settings.format_standart_rp_label': 'Roleplayフォーマット',
     'settings.generation': '生成と埋め込み',
     'settings.history_limit': '履歴の制限',
     'settings.history_limit_hint':
@@ -2769,6 +2780,8 @@ const dict: LangDict = Object.freeze({
     'settings.failed': '실패',
     'settings.fast_model': '빠른 모델',
     'settings.fast_model_hint': '요약, 메모리 압축 및 기타 가벼운 작업을 위한 저렴한 모델',
+    'settings.format_standart_rp_hint': '저장하기 전에 Roleplay 봇 응답의 불완전한 Markdown을 수정합니다.',
+    'settings.format_standart_rp_label': 'Roleplay 형식',
     'settings.generation': '생성 및 임베딩',
     'settings.history_limit': '기록 제한',
     'settings.history_limit_hint':
@@ -3397,6 +3410,9 @@ const dict: LangDict = Object.freeze({
     'settings.fast_model': 'Быстрая модель',
     'settings.fast_model_hint':
       'Дешёвая модель для суммаризации, сжатия памяти и других лёгких задач',
+    'settings.format_standart_rp_hint':
+      'Исправлять незакрытый Markdown в ответах RP-ботов перед сохранением.',
+    'settings.format_standart_rp_label': 'Форматирование Roleplay',
     'settings.generation': 'Генерация и эмбеддинги',
     'settings.history_limit': 'Лимит истории',
     'settings.history_limit_hint':
@@ -3944,6 +3960,8 @@ const dict: LangDict = Object.freeze({
     'settings.failed': '失败',
     'settings.fast_model': '快速模型',
     'settings.fast_model_hint': '用于摘要、记忆压缩及其他轻量级任务的低成本模型',
+    'settings.format_standart_rp_hint': '在保存前修复 Roleplay 机器人回复中不完整的 Markdown。',
+    'settings.format_standart_rp_label': 'Roleplay 格式化',
     'settings.generation': '生成与嵌入',
     'settings.history_limit': '历史记录限制',
     'settings.history_limit_hint':

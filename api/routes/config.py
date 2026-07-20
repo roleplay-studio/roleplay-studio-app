@@ -53,6 +53,7 @@ async def get_config():
         "context_compression_enabled": settings.context_compression_enabled,
         "context_compression_threshold": settings.context_compression_threshold,
         "context_compression_keep_recent": settings.context_compression_keep_recent,
+        "format_standart_rp_enabled": settings.format_standart_rp_enabled,
         "version": settings.version,
         "environment": environment,
         "debug_enabled": settings.debug_enabled,
@@ -146,6 +147,9 @@ async def update_config(body: UpdateConfigRequest):
         else None,
         "CONTEXT_COMPRESSION_KEEP_RECENT": str(body.context_compression_keep_recent)
         if body.context_compression_keep_recent is not None
+        else None,
+        "FORMAT_STANDART_RP_ENABLED": str(body.format_standart_rp_enabled).lower()
+        if body.format_standart_rp_enabled is not None
         else None,
         "HISTORY_LIMIT": str(body.history_limit) if body.history_limit is not None else None,
         # ── TTS (text-to-speech) ─────────────────────────────────

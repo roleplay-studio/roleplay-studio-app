@@ -185,6 +185,10 @@ class Settings(BaseSettings):
     context_compression_keep_recent: int = Field(20, ge=0)
     summarize_batch_enabled: bool = True
     summarize_batch_size: int = Field(3, ge=1, le=20)
+    # Repair malformed RP markdown/prose before persisting assistant
+    # messages. Enabled by default to preserve the existing behaviour;
+    # the Settings page can disable it at runtime.
+    format_standart_rp_enabled: bool = True
 
     # ── State context ─────────────────────────────────────────────
     # Number of recent user/assistant pairs the state-generation
@@ -385,8 +389,7 @@ class Settings(BaseSettings):
 
         if v_norm == "":
             logging.getLogger(__name__).warning(
-                "Settings.llm_provider is empty/non-string (%r); "
-                "falling back to 'mock'",
+                "Settings.llm_provider is empty/non-string (%r); falling back to 'mock'",
                 v,
             )
             return "mock"

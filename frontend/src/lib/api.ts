@@ -143,6 +143,7 @@ export interface AppConfig {
    *  the System section in Settings to flag dev-mode explicitly. */
   environment: string;
   fast_model: string;
+  format_standart_rp_enabled: boolean;
   history_limit: number;
   knowledge_relevance_threshold: number;
   language: string;
@@ -908,6 +909,7 @@ export const api = {
     embedding_base_url?: null | string;
     embedding_model?: string;
     fast_model?: string;
+    format_standart_rp_enabled?: boolean;
     history_limit?: number;
     knowledge_relevance_threshold?: number;
     language?: string;

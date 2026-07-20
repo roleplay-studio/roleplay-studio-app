@@ -49,6 +49,7 @@
   let editEmbedding = $state('');
   let editRagEnabled = $state(false);
   let editFastModel = $state('');
+  let editFormatStandartRpEnabled = $state(true);
   let editSummarizeEnabled = $state(true);
   let editSummarizeMaxTokens = $state(256);
   let editSummarizeMinLength = $state(100);
@@ -256,6 +257,7 @@
       editEmbeddingApiKey = ''; // user must type to change
       embeddingTestResult = null;
       editFastModel = cfg.fast_model;
+      editFormatStandartRpEnabled = cfg.format_standart_rp_enabled ?? true;
       editSummarizeEnabled = cfg.summarize_enabled;
       editSummarizeMaxTokens = cfg.summarize_max_tokens ?? 256;
       editSummarizeMinLength = cfg.summarize_min_length ?? 100;
@@ -363,6 +365,7 @@
         embedding_base_url: editEmbeddingBaseUrl,
         embedding_model: editEmbedding,
         fast_model: editFastModel,
+        format_standart_rp_enabled: editFormatStandartRpEnabled,
         history_limit: editHistoryLimit,
         knowledge_relevance_threshold: editKnowledgeThreshold,
         language: editLanguage,
@@ -738,6 +741,15 @@
                   <code class="range-value">{editMaxTokens}</code>
                 </div>
                 <p class="field-hint">{t('settings.max_tokens_hint', lang)}</p>
+              </div>
+              <div class="field-group">
+                <div class="toggle-row">
+                  <div>
+                    <label class="field-label">{t('settings.format_standart_rp_label', lang)}</label>
+                    <p class="field-hint">{t('settings.format_standart_rp_hint', lang)}</p>
+                  </div>
+                  <Toggle bind:checked={editFormatStandartRpEnabled} />
+                </div>
               </div>
             </div>
           </div>

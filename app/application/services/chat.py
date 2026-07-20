@@ -106,6 +106,8 @@ def _repair_for_rp(
     repairer: MarkdownRepairer,
     bot_type: BotType | str | None,
     text: str,
+    *,
+    enabled: bool = True,
 ) -> str:
     """Run ``repairer.repair(text)`` only if ``bot_type`` is RP.
 
@@ -135,7 +137,7 @@ def _repair_for_rp(
         normalised = bot_type.value.lower()
     else:
         return text
-    if normalised != BotType.RP.value:
+    if normalised != BotType.RP.value or not enabled:
         return text
     return repairer.repair(text)
 
@@ -194,7 +196,9 @@ class ChatService:
         # format-standart-rp library installed. Production wiring
         # in app.bootstrap.py always passes a real implementation.
         self._markdown_repairer: MarkdownRepairer = (
-            markdown_repairer if markdown_repairer is not None else _NullMarkdownRepairer()
+            markdown_repairer
+            if markdown_repairer is not None and self._settings.format_standart_rp_enabled
+            else _NullMarkdownRepairer()
         )
         # NOTE: the old `_first_message_saved: set[int]` in-memory
         # registry was removed (K4 in docs/review.md). It had three
@@ -404,7 +408,12 @@ class ChatService:
             response = "".join(content_chunks)
             full_reasoning = "".join(reasoning_chunks)
             if response:
-                response = _repair_for_rp(self._markdown_repairer, bot_type, response)
+                response = _repair_for_rp(
+                    self._markdown_repairer,
+                    bot_type,
+                    response,
+                    enabled=self._settings.format_standart_rp_enabled,
+                )
                 await self._messages.save(
                     command.thread_id,
                     "assistant",
@@ -435,7 +444,12 @@ class ChatService:
         response = "".join(content_chunks)
         full_reasoning = "".join(reasoning_chunks)
         if response:
-            response = _repair_for_rp(self._markdown_repairer, bot_type, response)
+            response = _repair_for_rp(
+                self._markdown_repairer,
+                bot_type,
+                response,
+                enabled=self._settings.format_standart_rp_enabled,
+            )
             assistant_msg_id = await self._messages.save(
                 command.thread_id,
                 "assistant",
@@ -1332,7 +1346,12 @@ class ChatService:
             response = "".join(content_chunks)
             full_reasoning = "".join(reasoning_chunks)
             if response:
-                response = _repair_for_rp(self._markdown_repairer, bot_type, response)
+                response = _repair_for_rp(
+                    self._markdown_repairer,
+                    bot_type,
+                    response,
+                    enabled=self._settings.format_standart_rp_enabled,
+                )
                 await self._messages.save_branch(
                     thread_id,
                     "assistant",
@@ -1363,7 +1382,12 @@ class ChatService:
         response = "".join(content_chunks)
         full_reasoning = "".join(reasoning_chunks)
         if response:
-            response = _repair_for_rp(self._markdown_repairer, bot_type, response)
+            response = _repair_for_rp(
+                self._markdown_repairer,
+                bot_type,
+                response,
+                enabled=self._settings.format_standart_rp_enabled,
+            )
             new_id = await self._messages.save_branch(
                 thread_id,
                 "assistant",
@@ -1484,7 +1508,12 @@ class ChatService:
             # User-initiated abort — persist the partial with status='stopped'.
             response = "".join(chunks)
             if response:
-                response = _repair_for_rp(self._markdown_repairer, bot_type, response)
+                response = _repair_for_rp(
+                    self._markdown_repairer,
+                    bot_type,
+                    response,
+                    enabled=self._settings.format_standart_rp_enabled,
+                )
                 await self._messages.save(
                     thread_id, "assistant", response, generation_status="stopped"
                 )
@@ -1501,7 +1530,12 @@ class ChatService:
 
         response = "".join(chunks)
         if response:
-            response = _repair_for_rp(self._markdown_repairer, bot_type, response)
+            response = _repair_for_rp(
+                self._markdown_repairer,
+                bot_type,
+                response,
+                enabled=self._settings.format_standart_rp_enabled,
+            )
             await self._messages.save(
                 thread_id, "assistant", response, generation_status="complete"
             )
@@ -1660,8 +1694,7 @@ class ChatService:
             bot_skill_ids = json.loads(raw_skill_ids)
         except (json.JSONDecodeError, TypeError):
             logger.warning(
-                "[chat-build] bot %s has malformed skill_ids=%r; "
-                "treating as empty",
+                "[chat-build] bot %s has malformed skill_ids=%r; treating as empty",
                 command.bot_id,
                 getattr(bot, "skill_ids", None),
             )

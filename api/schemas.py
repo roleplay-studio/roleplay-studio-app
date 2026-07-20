@@ -23,6 +23,7 @@ class UpdateConfigRequest(BaseModel):
     context_compression_enabled: bool | None = None
     context_compression_threshold: int | None = None
     context_compression_keep_recent: int | None = None
+    format_standart_rp_enabled: bool | None = None
     # Cap on messages loaded from the DB for the LLM context.
     # ``None`` leaves the existing value alone so the Settings page
     # can omit it from its PATCH (saves don't overwrite fields the
