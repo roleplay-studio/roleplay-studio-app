@@ -707,3 +707,169 @@ def test_per_turn_skills_block_content_identical_to_initial():
     assert graph_skills_msgs[1] == stream_skills_msgs[1], (
         "per-turn <Skills> block differs between graph and streaming paths"
     )
+
+
+# ── _build_per_turn_injections helper (DRY regression guard) ─────
+#
+# Both prompt-assembly paths (``_node_user_input`` graph +
+# ``_build_all_messages`` streaming) call this helper. A future
+# edit that diverges the two paths would be a silent regression —
+# these tests guard the helper directly so a refactor that
+# accidentally drops or reorders an injection fails fast.
+
+
+def test_per_turn_injections_helper_returns_three_blocks_when_all_present():
+    """All three optional injections fire (in order) when DSP, skills,
+    and prev_world_state are all non-empty.
+    """
+    orch = _build_orchestrator()
+    request = ConversationRequest(
+        thread_id=1,
+        bot_id=1,
+        user_input="hi",
+        bot_name="Lili",
+        bot_personality="friendly",
+        bot_scenario="",
+        first_message="",
+        bot_type="rp",
+        history=[],
+        untrusted_context=[],
+        skills=[_make_skill(1, "Sarcastic", description="dry wit")],
+        dynamic_system_prompt="Stay in character",
+        prev_world_state="loc: tavern",
+    )
+    injections = orch._build_per_turn_injections(request)
+    assert len(injections) == 3
+    assert injections[0]["content"].startswith("[Reminder] ")
+    assert injections[0]["content"] == "[Reminder] Stay in character"
+    assert injections[1]["content"].startswith("<Skills>")
+    assert injections[2]["content"].startswith("[World state from previous turn] ")
+    assert injections[2]["content"] == "[World state from previous turn] loc: tavern"
+
+
+def test_per_turn_injections_helper_skips_empty_fields():
+    """Empty DSP, empty skills, empty prev_world_state → empty list.
+    Edge: when DSP is empty, [Reminder] is skipped; when skills is
+    empty, [Skills] is skipped (per-turn AND initial — both go
+    through _build_skills_block which returns None).
+    """
+    orch = _build_orchestrator()
+    request = ConversationRequest(
+        thread_id=1,
+        bot_id=1,
+        user_input="hi",
+        bot_name="Lili",
+        bot_personality="friendly",
+        bot_scenario="",
+        first_message="",
+        bot_type="rp",
+        history=[],
+        untrusted_context=[],
+        skills=[],
+        dynamic_system_prompt="",
+        prev_world_state="",
+    )
+    injections = orch._build_per_turn_injections(request)
+    assert injections == []
+
+
+def test_per_turn_injections_helper_preserves_order_with_subsets():
+    """Subset of injections: ordering is preserved and skipped
+    fields do NOT leave gaps. Specifically:
+    - DSP only → [Reminder]
+    - skills only → [Skills]
+    - world_state only → [World state from previous turn]
+    - DSP + skills (no world_state) → [Reminder, Skills]
+    - DSP + world_state (no skills) → [Reminder, World state]
+    - skills + world_state (no DSP) → [Skills, World state]
+    """
+    orch = _build_orchestrator()
+    skills = [_make_skill(1, "Sarcastic", description="dry wit")]
+
+    def _req(*, dsp="", skills_arg=None, world=""):
+        return ConversationRequest(
+            thread_id=1,
+            bot_id=1,
+            user_input="hi",
+            bot_name="Lili",
+            bot_personality="friendly",
+            bot_scenario="",
+            first_message="",
+            bot_type="rp",
+            history=[],
+            untrusted_context=[],
+            skills=skills_arg if skills_arg is not None else [],
+            dynamic_system_prompt=dsp,
+            prev_world_state=world,
+        )
+
+    # DSP only.
+    injections = orch._build_per_turn_injections(_req(dsp="Stay"))
+    assert len(injections) == 1
+    assert injections[0]["content"] == "[Reminder] Stay"
+
+    # Skills only.
+    injections = orch._build_per_turn_injections(_req(skills_arg=skills))
+    assert len(injections) == 1
+    assert injections[0]["content"].startswith("<Skills>")
+
+    # World state only.
+    injections = orch._build_per_turn_injections(_req(world="loc: tavern"))
+    assert len(injections) == 1
+    assert injections[0]["content"] == "[World state from previous turn] loc: tavern"
+
+    # DSP + skills (no world_state).
+    injections = orch._build_per_turn_injections(
+        _req(dsp="Stay", skills_arg=skills)
+    )
+    assert len(injections) == 2
+    assert injections[0]["content"] == "[Reminder] Stay"
+    assert injections[1]["content"].startswith("<Skills>")
+
+    # DSP + world_state (no skills).
+    injections = orch._build_per_turn_injections(
+        _req(dsp="Stay", world="loc: tavern")
+    )
+    assert len(injections) == 2
+    assert injections[0]["content"] == "[Reminder] Stay"
+    assert injections[1]["content"] == "[World state from previous turn] loc: tavern"
+
+    # Skills + world_state (no DSP).
+    injections = orch._build_per_turn_injections(
+        _req(skills_arg=skills, world="loc: tavern")
+    )
+    assert len(injections) == 2
+    assert injections[0]["content"].startswith("<Skills>")
+    assert injections[1]["content"] == "[World state from previous turn] loc: tavern"
+
+
+def test_per_turn_injections_helper_substitutes_variables_in_dsp():
+    """DSP variable substitution (e.g. {{char}}) runs inside the helper.
+    Confirms ``{{char}}`` is replaced with ``bot_name`` and the helper
+    is the single point of substitution. We do NOT assert on
+    ``{{user}}`` here because that placeholder requires a non-empty
+    ``user_persona`` which would need an extra fake — out of scope
+    for this DRY-guard test.
+    """
+    orch = _build_orchestrator()
+    request = ConversationRequest(
+        thread_id=1,
+        bot_id=1,
+        user_input="hi",
+        bot_name="Lili",
+        bot_personality="friendly",
+        bot_scenario="",
+        first_message="",
+        bot_type="rp",
+        history=[],
+        untrusted_context=[],
+        skills=[],
+        dynamic_system_prompt="Always greet as {{char}}.",
+        prev_world_state="",
+    )
+    injections = orch._build_per_turn_injections(request)
+    assert len(injections) == 1
+    assert injections[0]["content"].startswith("[Reminder] ")
+    # {{char}} is substituted with bot_name.
+    assert "{{char}}" not in injections[0]["content"]
+    assert "Lili" in injections[0]["content"]
