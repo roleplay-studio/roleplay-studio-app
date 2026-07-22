@@ -235,7 +235,12 @@ def test_skills_block_falls_back_to_truncated_instruction_when_description_empty
 
 
 def test_skills_block_injected_in_build_all_messages_when_skills_present():
-    """Streaming path mirrors graph path. CRITICAL for AGENTS.md §2. """
+    """Streaming path mirrors graph path. CRITICAL for AGENTS.md §2.
+
+    With the per-turn [Skills] safety net, the streaming path now
+    produces TWO <Skills> blocks: the initial system-prompt block
+    AND the per-turn re-injection. Both must be present.
+    """
     orch = _build_orchestrator()
     request = _make_request(
         skills=[_make_skill(1, "Sarcastic", description="dry wit")],
@@ -243,8 +248,11 @@ def test_skills_block_injected_in_build_all_messages_when_skills_present():
     messages = orch._build_all_messages(request)
 
     skills_msgs = [m for m in messages if m["role"] == "system" and "<Skills>" in m["content"]]
-    assert len(skills_msgs) == 1
+    assert len(skills_msgs) == 2, (
+        f"expected 2 <Skills> blocks (initial + per-turn), got {len(skills_msgs)}"
+    )
     assert "Sarcastic" in skills_msgs[0]["content"]
+    assert "Sarcastic" in skills_msgs[1]["content"]
 
 
 def test_skills_block_skipped_in_build_all_messages_when_no_skills():
@@ -356,4 +364,346 @@ def test_skills_coexists_with_dynamic_system_prompt_via_user_input():
     assert skills_idx < reminder_idx, (
         "Skills should be in the early system-prompt block; "
         "reminder is per-turn and comes later"
+    )
+
+
+# ── Per-turn [Skills] re-injection (Skills safety net) ───────────
+#
+# Skills get injected twice per turn:
+#   1. Initial system-prompt block (via _node_system_prompt /
+#      _build_all_messages early branch) — survives when the
+#      provider keeps the first system message under middle-out
+#      truncation.
+#   2. Per-turn block at the END of the prompt, right after
+#      [Reminder] (and before [World state from previous turn]).
+#      This is the **safety net**: providers that cut from the
+#      middle of long conversations will still surface the skills
+#      catalog because it's adjacent to the user turn.
+#
+# The two blocks must produce **identical content** (same XML
+# format, same order, same skills) so the LLM sees the same rules
+# regardless of which end of the prompt the model attends to.
+# A divergent per-turn block is a silent regression.
+
+
+def test_per_turn_skills_block_injected_in_node_user_input():
+    """Graph path: _node_user_input appends a per-turn <Skills>...</Skills>
+    block AFTER the [Reminder] block (or as the first per-turn injection
+    when no reminder is set), and BEFORE [World state from previous turn].
+    """
+    orch = _build_orchestrator()
+    request = ConversationRequest(
+        thread_id=1,
+        bot_id=1,
+        user_input="hi",
+        bot_name="Lili",
+        bot_personality="friendly",
+        bot_scenario="",
+        first_message="",
+        bot_type="rp",
+        history=[],
+        untrusted_context=[],
+        skills=[
+            _make_skill(1, "Sarcastic", description="dry wit"),
+            _make_skill(2, "Concise", description="short replies"),
+        ],
+        dynamic_system_prompt="Stay in character",
+        prev_world_state="loc: tavern",
+    )
+    # Prime state with the early system_prompt node so messages already
+    # have the initial <Persona>/<Skills> in place.
+    state: dict[str, Any] = {
+        "request": request,
+        "messages": [],
+        "response": "",
+        "bot_type": "rp",
+    }
+    state = orch._node_system_prompt(state)
+    state = orch._node_user_input(state)
+    messages = state["messages"]
+
+    # Count <Skills> blocks. We expect TWO: initial (from _node_system_prompt)
+    # + per-turn (from _node_user_input). Both must be system messages.
+    skills_msgs = [
+        m for m in messages
+        if m["role"] == "system" and "<Skills>" in m["content"]
+    ]
+    assert len(skills_msgs) == 2, (
+        f"expected 2 <Skills> blocks (initial + per-turn), got {len(skills_msgs)}"
+    )
+    # Per-turn block content matches the catalog format.
+    per_turn = skills_msgs[1]["content"]
+    assert "Sarcastic" in per_turn and "Concise" in per_turn
+    assert per_turn.startswith("<Skills>")
+    assert per_turn.rstrip().endswith("</Skills>")
+
+
+def test_per_turn_skills_block_in_build_all_messages():
+    """Streaming path: _build_all_messages appends a per-turn <Skills>
+    block AFTER [Reminder] (or as the first per-turn injection when no
+    reminder is set) and BEFORE [World state from previous turn].
+    Mirrors the graph path's _node_user_input — see AGENTS.md §2.
+    """
+    orch = _build_orchestrator()
+    request = ConversationRequest(
+        thread_id=1,
+        bot_id=1,
+        user_input="hi",
+        bot_name="Lili",
+        bot_personality="friendly",
+        bot_scenario="",
+        first_message="",
+        bot_type="rp",
+        history=[],
+        untrusted_context=[],
+        skills=[_make_skill(1, "Sarcastic", description="dry wit")],
+        dynamic_system_prompt="Stay in character",
+        prev_world_state="loc: tavern",
+    )
+    messages = orch._build_all_messages(request)
+
+    skills_msgs = [
+        m for m in messages
+        if m["role"] == "system" and "<Skills>" in m["content"]
+    ]
+    assert len(skills_msgs) == 2, (
+        f"expected 2 <Skills> blocks (initial + per-turn), got {len(skills_msgs)}"
+    )
+
+
+def test_per_turn_skills_block_skipped_when_no_skills():
+    """No skills attached → no per-turn [Skills] block (also no initial)."""
+    orch = _build_orchestrator()
+    request = ConversationRequest(
+        thread_id=1,
+        bot_id=1,
+        user_input="hi",
+        bot_name="Lili",
+        bot_personality="friendly",
+        bot_scenario="",
+        first_message="",
+        bot_type="rp",
+        history=[],
+        untrusted_context=[],
+        skills=[],
+        dynamic_system_prompt="Stay in character",
+    )
+    state: dict[str, Any] = {
+        "request": request,
+        "messages": [],
+        "response": "",
+        "bot_type": "rp",
+    }
+    state = orch._node_system_prompt(state)
+    state = orch._node_user_input(state)
+    skills_msgs = [m for m in state["messages"] if "<Skills>" in m["content"]]
+    assert skills_msgs == [], "no <Skills> block when bot has no skills"
+
+
+def test_per_turn_skills_block_positioned_between_reminder_and_world_state():
+    """Per-turn ordering: [Reminder] → [Skills] → [World state from previous turn] → user.
+
+    Skills sit between the dynamic prompt and the world state so the
+    LLM reads them as a contiguous "behavioural rules" bundle at the
+    end of the prompt — adjacent to the user turn and therefore
+    surfaced by middle-out truncation that cuts the middle.
+    """
+    orch = _build_orchestrator()
+    request = ConversationRequest(
+        thread_id=1,
+        bot_id=1,
+        user_input="hi",
+        bot_name="Lili",
+        bot_personality="friendly",
+        bot_scenario="",
+        first_message="",
+        bot_type="rp",
+        history=[],
+        untrusted_context=[],
+        skills=[_make_skill(1, "Sarcastic", description="dry wit")],
+        dynamic_system_prompt="Stay in character",
+        prev_world_state="loc: tavern",
+    )
+    state: dict[str, Any] = {
+        "request": request,
+        "messages": [],
+        "response": "",
+        "bot_type": "rp",
+    }
+    state = orch._node_system_prompt(state)
+    state = orch._node_user_input(state)
+    messages = state["messages"]
+
+    def _find_index(predicate):
+        return next(i for i, m in enumerate(messages) if predicate(m["content"]))
+
+    # Initial system-prompt block (early).
+    initial_skills_idx = _find_index(lambda c: "<Skills>" in c)
+    # Per-turn injections — look at indices AFTER history.
+    reminder_idx = _find_index(lambda c: c.startswith("[Reminder] "))
+    # Per-turn block is the SECOND <Skills> block (first is the initial).
+    skills_indices = [
+        i for i, m in enumerate(messages) if m["content"].startswith("<Skills>")
+    ]
+    per_turn_skills_idx = skills_indices[1]
+    world_state_idx = _find_index(
+        lambda c: c.startswith("[World state from previous turn] ")
+    )
+    user_idx = next(
+        i for i, m in enumerate(messages) if m["role"] == "user"
+    )
+
+    # Initial block at idx 1 (after <Persona> at idx 0).
+    assert initial_skills_idx == 1
+    # Per-turn block lands between reminder and world state.
+    assert reminder_idx < per_turn_skills_idx < world_state_idx, (
+        f"expected reminder < per_turn_skills < world_state, "
+        f"got reminder={reminder_idx} skills={per_turn_skills_idx} "
+        f"world_state={world_state_idx}"
+    )
+    # And the user turn is the very last message.
+    assert user_idx == len(messages) - 1
+
+
+def test_per_turn_skills_block_positioned_after_reminder_only_when_no_world_state():
+    """When prev_world_state is empty, the per-turn [Skills] block still
+    lands after [Reminder] (or as the first per-turn injection when
+    no reminder) and right before the user turn.
+    """
+    orch = _build_orchestrator()
+    request = ConversationRequest(
+        thread_id=1,
+        bot_id=1,
+        user_input="hi",
+        bot_name="Lili",
+        bot_personality="friendly",
+        bot_scenario="",
+        first_message="",
+        bot_type="rp",
+        history=[],
+        untrusted_context=[],
+        skills=[_make_skill(1, "Sarcastic", description="dry wit")],
+        dynamic_system_prompt="Stay in character",
+        prev_world_state="",
+    )
+    state: dict[str, Any] = {
+        "request": request,
+        "messages": [],
+        "response": "",
+        "bot_type": "rp",
+    }
+    state = orch._node_system_prompt(state)
+    state = orch._node_user_input(state)
+    messages = state["messages"]
+
+    reminder_idx = next(
+        i for i, m in enumerate(messages) if m["content"].startswith("[Reminder] ")
+    )
+    # Per-turn [Skills] is the second <Skills> block.
+    skills_indices = [
+        i for i, m in enumerate(messages) if m["content"].startswith("<Skills>")
+    ]
+    per_turn_skills_idx = skills_indices[1]
+    user_idx = next(
+        i for i, m in enumerate(messages) if m["role"] == "user"
+    )
+    assert reminder_idx < per_turn_skills_idx < user_idx
+
+
+def test_per_turn_skills_block_when_no_reminder_only_skills():
+    """When dynamic_system_prompt is empty but skills are present, the
+    per-turn [Skills] block still fires. This guards against the
+    'skills only fire when DSP is set' failure mode — Skills are an
+    independent per-turn injection, not a sub-block of [Reminder].
+    """
+    orch = _build_orchestrator()
+    request = ConversationRequest(
+        thread_id=1,
+        bot_id=1,
+        user_input="hi",
+        bot_name="Lili",
+        bot_personality="friendly",
+        bot_scenario="",
+        first_message="",
+        bot_type="rp",
+        history=[],
+        untrusted_context=[],
+        skills=[_make_skill(1, "Sarcastic", description="dry wit")],
+        dynamic_system_prompt="",  # empty — no reminder
+        prev_world_state="",
+    )
+    state: dict[str, Any] = {
+        "request": request,
+        "messages": [],
+        "response": "",
+        "bot_type": "rp",
+    }
+    state = orch._node_system_prompt(state)
+    state = orch._node_user_input(state)
+    messages = state["messages"]
+
+    skills_msgs = [m for m in messages if "<Skills>" in m["content"]]
+    assert len(skills_msgs) == 2
+    # No [Reminder] block.
+    assert not any(
+        m["content"].startswith("[Reminder] ") for m in messages
+    ), "no reminder expected when DSP is empty"
+
+
+def test_per_turn_skills_block_content_identical_to_initial():
+    """The per-turn [Skills] block must render the same XML content
+    as the initial [Skills] block — same format, same order, same
+    skills. This is the safety-net invariant: the LLM sees the
+    same rules regardless of which end of the prompt it attends to.
+    """
+    orch = _build_orchestrator()
+    skills = [
+        _make_skill(1, "Sarcastic", description="dry wit", instruction="apply when"),
+        _make_skill(2, "Concise", description="short", instruction="keep brief"),
+    ]
+    request = ConversationRequest(
+        thread_id=1,
+        bot_id=1,
+        user_input="hi",
+        bot_name="Lili",
+        bot_personality="friendly",
+        bot_scenario="",
+        first_message="",
+        bot_type="rp",
+        history=[],
+        untrusted_context=[],
+        skills=skills,
+        dynamic_system_prompt="Stay in character",
+    )
+
+    # Graph path: initial block + per-turn block via _node_user_input.
+    state: dict[str, Any] = {
+        "request": request,
+        "messages": [],
+        "response": "",
+        "bot_type": "rp",
+    }
+    state = orch._node_system_prompt(state)
+    state = orch._node_user_input(state)
+    graph_skills_msgs = [
+        m["content"] for m in state["messages"]
+        if m["role"] == "system" and "<Skills>" in m["content"]
+    ]
+    assert len(graph_skills_msgs) == 2
+    assert graph_skills_msgs[0] == graph_skills_msgs[1], (
+        "Initial and per-turn <Skills> blocks must have identical content"
+    )
+
+    # Streaming path: same identity check.
+    stream_messages = orch._build_all_messages(request)
+    stream_skills_msgs = [
+        m["content"] for m in stream_messages
+        if m["role"] == "system" and "<Skills>" in m["content"]
+    ]
+    assert len(stream_skills_msgs) == 2
+    assert stream_skills_msgs[0] == stream_skills_msgs[1]
+    # Cross-path: the per-turn block must be identical between graph
+    # and streaming paths.
+    assert graph_skills_msgs[1] == stream_skills_msgs[1], (
+        "per-turn <Skills> block differs between graph and streaming paths"
     )

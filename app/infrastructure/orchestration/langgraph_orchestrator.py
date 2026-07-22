@@ -409,6 +409,16 @@ class LangGraphConversationOrchestrator:
             messages.append(
                 {"role": "system", "content": f"[Reminder] {substituted}"}
             )
+        # Per-turn [Skills] safety net: re-inject the skills catalog
+        # right after the [Reminder] block (or as the first per-turn
+        # injection when DSP is empty). This guarantees the LLM sees
+        # the behavioural rules even when the provider applies
+        # middle-out truncation that cuts the early system-prompt
+        # block — the per-turn [Skills] sits adjacent to the user
+        # turn and survives.
+        skills_per_turn = self._build_skills_block(request.skills)
+        if skills_per_turn is not None:
+            messages.append(skills_per_turn)
         if request.prev_world_state.strip():
             messages.append(
                 {
@@ -679,6 +689,14 @@ class LangGraphConversationOrchestrator:
             messages.append(
                 {"role": "system", "content": f"[Reminder] {substituted}"}
             )
+        # Per-turn [Skills] safety net — mirror of _node_user_input.
+        # Re-injects the skills catalog after [Reminder] (or as the
+        # first per-turn injection when DSP is empty) so the LLM
+        # sees the behavioural rules adjacent to the user turn.
+        # See _node_user_input docstring for the truncation rationale.
+        skills_per_turn = self._build_skills_block(request.skills)
+        if skills_per_turn is not None:
+            messages.append(skills_per_turn)
         if request.prev_world_state.strip():
             messages.append(
                 {
