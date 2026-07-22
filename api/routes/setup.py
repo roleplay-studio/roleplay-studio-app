@@ -13,7 +13,7 @@ from api.bot_loader import load_from_json, load_from_png
 from api.bots_registry import list_starter_bots
 from api.deps import ContainerDep
 from api.schemas import ConfigureRequest
-from app.bootstrap import reset_container
+from app.bootstrap import reset_and_start_container
 from app.infrastructure.config import Settings
 from app.infrastructure.llm.providers.catalog import catalogs_as_wizard_list
 
@@ -145,7 +145,7 @@ async def setup_configure(body: ConfigureRequest, container: ContainerDep):
     # on the last wizard step). /configure only persists provider + env,
     # it does not auto-create a starter bot.
 
-    reset_container()
+    await reset_and_start_container()
 
     return {
         "ok": True,

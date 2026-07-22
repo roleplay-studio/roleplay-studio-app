@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException
 from api.constants import LANGUAGES
 from api.schemas import UpdateConfigRequest
 from app.application.exceptions import ConfigurationError
-from app.bootstrap import reset_container
+from app.bootstrap import reset_and_start_container
 from app.infrastructure.config import Settings
 from app.infrastructure.vectorstore import ChromaKnowledgeBase
 
@@ -177,10 +177,9 @@ async def update_config(body: UpdateConfigRequest):
         if value is not None:
             os.environ[env_key] = value
 
-    reset_container()
+    await reset_and_start_container()
 
     # Re-read and return updated config
-    # TODO(for-assistant): протестировать получше, замечал поломку работы бекенда после сохранения настроек, отправка сообщений в чат возвращает ошибку
     return await get_config()
 
 
