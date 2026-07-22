@@ -282,24 +282,6 @@
     </div>
   </div>
 
-  <!-- Sort dropdown. Picks the user-selectable order over the
-       threads array. Driven by the THREAD_SORT_MODE_KEYS map so
-       adding a new mode = adding one i18n string per language, no
-       UI change here. -->
-  {#if threads.length > 1}
-    <div class="td-sort">
-      <span class="td-sort-label">{t('thread_sort.label', lang)}</span>
-      <Select
-        bind:value={sortMode}
-        options={[
-          { label: t(THREAD_SORT_MODE_KEYS['by-last-activity'], lang), value: 'by-last-activity' },
-          { label: t(THREAD_SORT_MODE_KEYS['by-message-count'], lang), value: 'by-message-count' },
-          { label: t(THREAD_SORT_MODE_KEYS['by-name'], lang), value: 'by-name' },
-        ]}
-      />
-    </div>
-  {/if}
-
   <div class="td-list">
     {#each sortedThreads as thread (thread.id)}
       <ThreadItem

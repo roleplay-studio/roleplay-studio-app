@@ -327,6 +327,7 @@ export interface Persona {
 }
 
 export interface RecentThread {
+  name: string;
   bot_avatar_path: null | string;
   bot_categories: string[];
   bot_id: number;
