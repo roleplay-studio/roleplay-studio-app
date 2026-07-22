@@ -277,7 +277,9 @@ class ChatService:
         await self._messages.save_exchange(command.thread_id, command.user_input, response)
         return ChatResponse(content=response)
 
-    async def stream_save_first_message(self, thread_id: int, bot_id: int) -> None:
+    async def stream_save_first_message(
+        self, thread_id: int, bot_id: int, persona_name: str | None = None
+    ) -> None:
         """Save the bot's first_message as the initial message in a thread.
 
         Idempotency strategy (RC1.2 in docs/review.md): delegate the
@@ -291,20 +293,57 @@ class ChatService:
         (added in Sprint 1) were both racy under aiosqlite; this
         repository-level atomicity closes the gap without adding
         SELECT-then-INSERT window.
+
+        ``{{user}}`` substitution
+        -------------------------
+        ``bot.first_message`` may contain ``{{user}}`` template tokens
+        that the orchestrator's ``_variable_replace`` substitutes at
+        prompt-assembly time. Before this fix, the raw template was
+        persisted to the DB verbatim, so the literal ``{{user}}`` token
+        leaked into:
+
+        * the rebuilt history on every subsequent turn
+        * any future ``regenerate`` / ``retry`` that reads the saved row
+        * the visible message in the chat panel (LLMDebugModal)
+
+        We substitute the persona name inline here when one is
+        provided so the persisted row is the same text the LLM
+        actually saw on the first turn. ``None`` / empty string is a
+        no-op: the orchestrator will substitute on the first turn
+        and the placeholder survives in the DB so a later persona
+        change can still re-substitute without the old name being
+        baked in.
         """
         bot = await self._bots.get(bot_id)
         if bot is None or not bot.first_message:
             return
-        await self._messages.save_first_assistant_if_absent(thread_id, bot.first_message)
+        content = bot.first_message
+        if persona_name:  # non-empty string only
+            content = content.replace("{{user}}", persona_name)
+        await self._messages.save_first_assistant_if_absent(thread_id, content)
 
     # ── Section 2: Streaming core (the LLM call path) ──────────────
 
     async def stream_message(self, command: SendMessageCommand) -> AsyncGenerator[ChatChunk]:
-        # 1. Save first_message FIRST if this is a new thread
+        # 1. Save first_message FIRST if this is a new thread.
         # This ensures correct order in DB: first_message → user → assistant
         # (files need user message_id, so we save user after first_message)
+        #
+        # We resolve the user persona up front so the first_message
+        # row is persisted with ``{{user}}`` already substituted —
+        # otherwise the literal token would leak into the rebuilt
+        # history on every subsequent turn (and any future
+        # regenerate / retry). See ``stream_save_first_message``
+        # for the substitution semantics.
         if command.bot_id is not None:
-            await self.stream_save_first_message(command.thread_id, command.bot_id)
+            persona_name: str | None = None
+            if command.persona_id is not None and self._personas is not None:
+                persona = await self._personas.get(command.persona_id)
+                if persona is not None:
+                    persona_name = persona.name
+            await self.stream_save_first_message(
+                command.thread_id, command.bot_id, persona_name=persona_name
+            )
 
         # Resolve bot_type up-front so the markdown repair call below
         # (in the CancelledError/Exception handlers and the success
