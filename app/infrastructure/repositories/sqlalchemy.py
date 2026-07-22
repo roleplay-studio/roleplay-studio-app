@@ -644,6 +644,7 @@ class SqlAlchemyThreadRepository:
 
                 result.append(
                     RecentThreadDTO(
+                        name=row.name,
                         thread_id=row.thread_id,
                         bot_id=row.bot_id,
                         summary=row.summary,
@@ -708,6 +709,7 @@ class SqlAlchemyThreadRepository:
                     SELECT
                         t.id AS thread_id,
                         t.bot_id,
+                        t.name,
                         t.summary,
                         b.name AS bot_name,
                         b.avatar_path AS bot_avatar_path,
@@ -768,6 +770,7 @@ class SqlAlchemyThreadRepository:
                 preview_text: str = short if short else (row.last_message_preview or "")[:150]
                 result.append(
                     RecentThreadDTO(
+                        name=row.name,
                         thread_id=row.thread_id,
                         bot_id=row.bot_id,
                         summary=row.summary,

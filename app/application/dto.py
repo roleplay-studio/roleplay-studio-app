@@ -301,6 +301,7 @@ class RecentThreadDTO(BaseModel):
     """
 
     thread_id: int
+    name: str
     bot_id: int
     bot_name: str
     bot_avatar_path: str | None = None
