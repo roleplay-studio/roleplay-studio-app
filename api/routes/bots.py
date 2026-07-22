@@ -549,12 +549,40 @@ async def create_thread(
 ):
     persona_id = body.persona_id if body else None
     thread_id = await container.threads.create_thread(bot_id, persona_id=persona_id)
-    # Save first_message immediately so it appears in the thread on load
+    # Save first_message immediately so it appears in the thread on load.
+    # We also substitute ``{{user}}`` inline so the persisted row
+    # doesn't leak the literal placeholder into the rebuilt history
+    # on every subsequent turn (see ChatService.stream_save_first_message
+    # for the substitution semantics). Without this, the orchestrator
+    # path that goes through ``stream_message`` is fine on the first
+    # turn (it substitutes in-flight) but the DB row keeps the raw
+    # ``{{user}}`` token, so any future regenerate / retry / re-read
+    # from history leaks it.
     try:
         if container.chat is not None:
             bot = await container.bots.get_bot(bot_id)
             if bot and bot.first_message:
-                await container.chat.stream_save_first_message(thread_id, bot_id)
+                # Resolve the persona up front so the first_message
+                # row is persisted with ``{{user}}`` already substituted.
+                # A bad / missing persona id is silently treated as
+                # "no persona" — the orchestrator will substitute on
+                # the first turn instead.
+                persona_name: str | None = None
+                if persona_id is not None and container.personas is not None:
+                    try:
+                        persona = await container.personas.get(persona_id)
+                    except Exception:
+                        # NotFoundError from PersonaService.get (the
+                        # persona was deleted between picker and save),
+                        # or any other repo failure. Fall through to
+                        # "no persona" rather than failing the whole
+                        # thread creation.
+                        persona = None
+                    if persona is not None:
+                        persona_name = persona.name
+                await container.chat.stream_save_first_message(
+                    thread_id, bot_id, persona_name=persona_name
+                )
     except Exception:
         pass
     return {"id": thread_id}
