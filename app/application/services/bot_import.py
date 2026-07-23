@@ -15,6 +15,7 @@ The service depends on duck-typed ports (``BotRepository``,
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import uuid
@@ -61,7 +62,7 @@ class BotImportService:
         """
         card = parse_character_card(file_bytes, file_ext)
 
-        avatar_path = self.save_avatar_bytes(file_bytes, file_ext)
+        avatar_path = await self.save_avatar_bytes(file_bytes, file_ext)
 
         composed_personality, used_description = self._compose_personality(card)
         # If the fallback chain pulled the V2 description into
@@ -110,7 +111,9 @@ class BotImportService:
         otherwise the bot is created with no avatar.
         """
         ext = ".png" if avatar_bytes else ""
-        avatar_path = self.save_avatar_bytes(avatar_bytes, ext) if avatar_bytes else None
+        avatar_path = (
+            await self.save_avatar_bytes(avatar_bytes, ext) if avatar_bytes else None
+        )
 
         return await self._bots.create(
             card["name"].strip(),
@@ -123,13 +126,26 @@ class BotImportService:
             mes_example=card.get("mes_example", ""),
         )
 
-    def save_avatar_bytes(self, file_bytes: bytes, file_ext: str) -> str:
+    async def save_avatar_bytes(self, file_bytes: bytes, file_ext: str) -> str:
         """Persist avatar bytes to the avatars dir, returning the public path.
 
         Public so the setup wizard can hand off PNG-карточка bytes without
         re-parsing them as a character card. The bytes go through the same
         constrain + resize pipeline as :meth:`import_from_card`.
+
+        This is ``async`` so the blocking Pillow/IO work happens on a
+        worker thread via :func:`asyncio.to_thread` — otherwise the
+        FastAPI event loop stalls for the whole ``constrain_image`` +
+        ``resize_avatar`` round-trip on every character card import
+        (review.md, bot_import.py:126-148).
         """
+        # Disk write + Pillow re-encode: heavy CPU + blocking I/O. The
+        # pattern matches the rest of the codebase (``vectorstore.py``,
+        # ``upload.py``) — keep the sync helper tiny and testable, and
+        # off-load the whole thing to a worker thread.
+        return await asyncio.to_thread(self._save_avatar_bytes_sync, file_bytes, file_ext)
+
+    def _save_avatar_bytes_sync(self, file_bytes: bytes, file_ext: str) -> str:
         os.makedirs(self._avatar_dir, exist_ok=True)
         ext = file_ext if file_ext in _IMAGE_EXTS else ".png"
         stem = uuid.uuid4().hex

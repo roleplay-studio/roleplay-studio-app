@@ -448,3 +448,92 @@ async def test_import_empty_description_when_no_fallback_sources(
     args, kwargs = bot_repo.create.await_args
     assert args[1] == ""  # Bot.personality
     assert kwargs["description"] == ""  # Bot.description
+
+
+# ── save_avatar_bytes async contract (review.md: blocking I/O in event loop) ─
+
+
+@pytest.mark.asyncio
+async def test_save_avatar_bytes_is_awaitable(tmp_path) -> None:
+    """``save_avatar_bytes`` must be ``async`` so the Pillow/IO work
+    can be off-loaded to a worker thread via ``asyncio.to_thread``;
+    otherwise it blocks the FastAPI event loop on every import.
+
+    Reviewed in ``review.md`` (bot_import.py:126-148).
+    """
+    import inspect
+
+    svc = BotImportService(
+        bot_repo=AsyncMock(),
+        knowledge_service=AsyncMock(),
+        avatar_dir=tmp_path,
+    )
+    assert inspect.iscoroutinefunction(svc.save_avatar_bytes), (
+        "save_avatar_bytes must be async — synchronous Pillow/IO calls "
+        "block the FastAPI event loop during character card imports"
+    )
+
+
+@pytest.mark.asyncio
+async def test_save_avatar_bytes_returns_public_path(tmp_path) -> None:
+    """End-to-end: build a real PNG, await save_avatar_bytes, verify
+    the public ``/uploads/avatars/<stem>.<ext>`` contract is honoured
+    and the file lands under ``avatar_dir``.
+    """
+    img = Image.new("RGB", (64, 64), color=(100, 150, 200))
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    png_bytes = buf.getvalue()
+
+    svc = BotImportService(
+        bot_repo=AsyncMock(),
+        knowledge_service=AsyncMock(),
+        avatar_dir=tmp_path,
+    )
+
+    public_path = await svc.save_avatar_bytes(png_bytes, ".png")
+
+    assert public_path.startswith("/uploads/avatars/")
+    assert public_path.endswith(".png")
+    stem = public_path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    written = list(tmp_path.glob(f"{stem}.png")) + list(tmp_path.glob(f"{stem}_*.png"))
+    assert written, f"expected avatar file(s) under {tmp_path}, found none"
+
+
+@pytest.mark.asyncio
+async def test_save_avatar_bytes_does_not_block_event_loop(tmp_path) -> None:
+    """While ``save_avatar_bytes`` is running on a worker thread, an
+    unrelated coroutine on the same loop must be able to make progress.
+    A blocking implementation would only return after the I/O is done
+    and the event loop wouldn't tick the sibling task.
+    """
+    import asyncio
+
+    img = Image.new("RGB", (128, 128), color=(50, 50, 50))
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    png_bytes = buf.getvalue()
+
+    svc = BotImportService(
+        bot_repo=AsyncMock(),
+        knowledge_service=AsyncMock(),
+        avatar_dir=tmp_path,
+    )
+
+    ticks: list[int] = []
+
+    async def ticker() -> None:
+        for _ in range(5):
+            await asyncio.sleep(0)
+            ticks.append(1)
+
+    # Run both concurrently with a short overall deadline.
+    await asyncio.wait_for(
+        asyncio.gather(svc.save_avatar_bytes(png_bytes, ".png"), ticker()),
+        timeout=5.0,
+    )
+
+    assert len(ticks) >= 1, (
+        "save_avatar_bytes blocked the event loop — sibling coroutine "
+        "never got a chance to tick. Wrap Pillow/IO in asyncio.to_thread."
+    )
