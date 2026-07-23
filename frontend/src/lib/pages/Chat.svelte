@@ -34,6 +34,7 @@
   import { dismissNotification, isNotificationDismissed } from '../utils/notificationStore';
   import { parseMessageContent } from '../utils/parseMetadata';
   import { captureScrollAnchor, restoreScrollAnchor } from '../utils/scrollAnchor';
+  import { substituteGreetingPlaceholders } from '../utils/substitute-greeting-placeholders';
 
   // Dev-mode gate for the LLM debug modal. Vite's import.meta.env.DEV
   // is true for `npm run dev` and `tauri dev`, false for production
@@ -63,7 +64,7 @@
   let availableGreetings = $derived.by(() => {
     if (!bot) return [] as string[];
     const list = [bot.first_message, ...(bot.alternate_greetings ?? [])]
-      .map((s: string) => s.trim())
+      .map((s: string) => substituteGreetingPlaceholders(s.trim(), activePersonaName))
       .filter(Boolean);
     return list;
   });
@@ -140,6 +141,16 @@
   // Persona
   let personas: Persona[] = $state([]);
   let selectedPersonaId: null | number = $state(null);
+  // Resolve the currently selected persona's name so we can substitute
+  // ``{{user}}`` in the bot's greeting text at render time. The
+  // backend persists the substituted form (so the DB row is fine)
+  // but the greeting switcher renders the raw bot data
+  // (``bot.first_message`` + ``bot.alternate_greetings``), so we
+  // mirror the backend's ``_variable_replace`` here to keep the
+  // UI and the persisted state consistent.
+  let activePersonaName = $derived(
+    personas.find((p) => p.id === selectedPersonaId)?.name ?? null,
+  );
 
   // Thread drawer
   let showThreadDrawer = $state(false);
@@ -1248,6 +1259,11 @@
               } else if (data.type === 'error') {
                 // Server-side error mid-stream — mark as failed so finally
                 // doesn't re-fetch and wipe our error bubble.
+                // Surface the full detail to the browser console for
+                // power users who want to grep the backend log by the
+                // ``[ref: xxxxxxxx]`` token. The chat bubble shows the
+                // same text inline; the console copy is the "open the
+                // hood" path.
                 retryFailed = true;
                 messages = messages.slice(0, -1);
                 messages = [
@@ -1264,6 +1280,7 @@
                   },
                 ];
                 scrollToBottom();
+                console.error('Retry stream error:', data.detail);
               }
             } catch {
               /* ignore */

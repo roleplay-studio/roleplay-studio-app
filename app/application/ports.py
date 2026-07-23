@@ -27,7 +27,9 @@ from app.application.dto import (
 from app.domain.enums import BotType
 
 if TYPE_CHECKING:
-    from app.infrastructure.db.models import Bot, BotVersion
+    from app.infrastructure.db.models import Bot, BotVersion, GlobalSkill
+
+from pydantic import BaseModel, Field
 
 
 class SettingsRepository(Protocol):
@@ -601,3 +603,107 @@ class TTSProvider(Protocol):
         that don't support it should ignore it (don't error).
         """
         ...
+
+
+# ── Skills (Phase 1) ────────────────────────────────────────────
+
+
+class DeleteSkillResult(BaseModel):
+    """Result of :meth:`SkillRepository.delete`. See spec §6.1.
+
+    Two states:
+    - ``deleted=True`` — row removed; ``attached_to`` is empty.
+    - ``deleted=False`` — row kept (either doesn't exist, or is in use).
+      ``attached_to`` lists bot IDs that reference the skill so the
+      service layer can surface a 409 ConflictError with the same
+      payload (api/main.py application_error_handler maps the
+      ``attached_to`` attribute into the response body — see spec §6.4).
+    """
+
+    model_config = {"frozen": True}
+
+    deleted: bool
+    attached_to: list[int] = Field(default_factory=list)
+
+
+class SkillRepository(Protocol):
+    """Persistence port for :class:`GlobalSkill` rows + bot attachment queries.
+
+    Implementations live in ``app.infrastructure.repositories``.
+    See spec §6.1 for the contract; this Protocol is the type-level
+    contract that services depend on (clean architecture — services
+    never import infrastructure directly).
+    """
+
+    async def create(
+        self,
+        name: str,
+        description: str,
+        instruction: str,
+        tags: list[str],
+    ) -> int:
+        """Insert a new skill.
+
+        ``tags`` will be normalised by the implementation (lower-case,
+        stripped, deduped, insertion-order preserved).
+
+        Raises ``ValueError`` on duplicate ``name`` so the service layer
+        can map it to a 409 ConflictError.
+        """
+
+    async def get(self, skill_id: int) -> GlobalSkill | None:
+        """Fetch one skill by id, or ``None`` if it doesn't exist."""
+
+    async def list_all(
+        self,
+        q: str | None = None,
+        tag: str | None = None,
+    ) -> list[GlobalSkill]:
+        """List all skills, optionally filtered.
+
+        ``q`` — case-insensitive substring match against ``name`` and
+        ``description``. ``tag`` — case-insensitive exact match against
+        any tag in the ``tags`` list. Empty filters = return all rows,
+        ordered by id ASC.
+        """
+
+    async def list_by_ids(self, ids: list[int]) -> list[GlobalSkill]:
+        """Bulk fetch by id. Result ordered by id ASC.
+
+        Unknown ids are silently omitted — caller decides whether
+        surfacing them as ``BotResponse.skills_invalid`` is appropriate.
+        Empty input returns an empty list (not a query).
+        """
+
+    async def update(
+        self,
+        skill_id: int,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        instruction: str | None = None,
+        tags: list[str] | None = None,
+    ) -> None:
+        """Partial update — only the supplied fields are touched.
+
+        Raises ``NotFoundError`` if ``skill_id`` doesn't exist.
+        """
+
+    async def delete(self, skill_id: int) -> DeleteSkillResult:
+        """Delete the skill if it's not attached to any bot.
+
+        Returns ``DeleteSkillResult(deleted=True)`` on success.
+        Returns ``DeleteSkillResult(deleted=False, attached_to=[ids])``
+        if any bot has this id in ``skill_ids`` — the row is NOT
+        removed and the service layer translates this into a 409.
+        Returns ``DeleteSkillResult(deleted=False, attached_to=[])``
+        if the id doesn't exist (caller can distinguish via repo.get).
+        """
+
+    async def count_attached(self, skill_id: int) -> int:
+        """Return the number of distinct bots that reference this skill.
+
+        Used by the Library UI to show a "used by N bots" badge.
+        O(N) scan — small N (number of bots) makes indexed lookup
+        premature optimisation.
+        """

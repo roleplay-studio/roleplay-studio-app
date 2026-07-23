@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException
 from api.constants import LANGUAGES
 from api.schemas import UpdateConfigRequest
 from app.application.exceptions import ConfigurationError
-from app.bootstrap import reset_container
+from app.bootstrap import reset_and_start_container
 from app.infrastructure.config import Settings
 from app.infrastructure.vectorstore import ChromaKnowledgeBase
 
@@ -53,6 +53,7 @@ async def get_config():
         "context_compression_enabled": settings.context_compression_enabled,
         "context_compression_threshold": settings.context_compression_threshold,
         "context_compression_keep_recent": settings.context_compression_keep_recent,
+        "format_standart_rp_enabled": settings.format_standart_rp_enabled,
         "version": settings.version,
         "environment": environment,
         "debug_enabled": settings.debug_enabled,
@@ -147,6 +148,9 @@ async def update_config(body: UpdateConfigRequest):
         "CONTEXT_COMPRESSION_KEEP_RECENT": str(body.context_compression_keep_recent)
         if body.context_compression_keep_recent is not None
         else None,
+        "FORMAT_STANDART_RP_ENABLED": str(body.format_standart_rp_enabled).lower()
+        if body.format_standart_rp_enabled is not None
+        else None,
         "HISTORY_LIMIT": str(body.history_limit) if body.history_limit is not None else None,
         # ── TTS (text-to-speech) ─────────────────────────────────
         # ``tts_api_key`` accepts "***" (no change) or null/"" (also
@@ -173,10 +177,9 @@ async def update_config(body: UpdateConfigRequest):
         if value is not None:
             os.environ[env_key] = value
 
-    reset_container()
+    await reset_and_start_container()
 
     # Re-read and return updated config
-    # TODO(for-assistant): протестировать получше, замечал поломку работы бекенда после сохранения настроек, отправка сообщений в чат возвращает ошибку
     return await get_config()
 
 

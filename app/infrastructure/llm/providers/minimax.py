@@ -1,8 +1,8 @@
-"""Provider: MiniMax (api.minimaxi.com).
+"""Provider: MiniMax (api.minimax.io).
 
-Endpoint: ``https://api.minimaxi.com/v1`` — MiniMax hosts OpenAI-
-compatible chat-completions. ``MiniMax-Text-01`` is the text-only
-flagship; ``abab`` series are the older-generation models kept
+Endpoint: ``https://api.minimax.io/v1`` — MiniMax hosts OpenAI-
+compatible chat-completions. ``MiniMax-M3`` is the current
+flagship; ``MiniMax-M2.5`` is the previous generation kept
 around for compatibility.
 """
 
@@ -17,13 +17,11 @@ catalog = ProviderCatalog(
     provider_id="minimax",
     label="MiniMax",
     description="MiniMax chat & vision models",
-    default_base_url="https://api.minimaxi.com/v1",
-    default_model="MiniMax-Text-01",
+    default_base_url="https://api.minimax.io/v1",
+    default_model="MiniMax-M3",
     available_models=(
-        "MiniMax-Text-01",
-        "abab6.5s-chat",
-        "abab6.5-chat",
-        "abab5.5-chat",
+        "MiniMax-M3",
+        "MiniMax-M2.5",
     ),
     needs_key=True,
     manual_setup=False,

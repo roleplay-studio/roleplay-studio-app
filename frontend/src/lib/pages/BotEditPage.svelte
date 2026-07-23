@@ -2,12 +2,22 @@
   import { onMount, tick } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
 
-  import { api, API_BASE, type Bot, BOT_TYPES, type BotType, type KnowledgeEntry } from '../api';
+  import {
+    api,
+    API_BASE,
+    type Bot,
+    BOT_TYPES,
+    type BotType,
+    type KnowledgeEntry,
+    type SkillDTO,
+  } from '../api';
   import AvatarUpload from '../AvatarUpload.svelte';
+  import { hasHiddenRPContent } from '../botEditor';
   import CategoryPicker from '../CategoryPicker.svelte';
   import { currentLang, t } from '../i18n';
   import MarkdownRenderer from '../MarkdownRenderer.svelte';
-  import { Input, Loading, Select, Tabs, Textarea } from '../ui';
+  import SkillPicker from '../SkillPicker.svelte';
+  import { Input, Loading, Modal, Select, Tabs, Textarea } from '../ui';
   import { renderIcon } from '../ui/iconMap';
   import VersionsTimeline from '../ui/VersionsTimeline.svelte';
   import {
@@ -52,8 +62,13 @@
   let formCategories: string[] = $state([]);
   let formBotType: BotType = $state('rp');
   let allCategories: string[] = $state([]);
-  let uploading = $state(false);
 
+  // Skills — Phase 6
+  let formSkillIds: number[] = $state([]);
+  let allSkills: SkillDTO[] = $state([]);
+  let maxSkillsPerBot = 10;
+
+  let uploading = $state(false);
   // Knowledge base
   let entries: KnowledgeEntry[] = $state([]);
   let newKnowledgeContent = $state('');
@@ -92,14 +107,17 @@
     try {
       const id = parseInt(botId);
       if (id) {
-        const [b, cats, kEntries] = await Promise.all([
+        const [b, cats, kEntries, skills] = await Promise.all([
           api.getBot(id),
           api.categories(),
           api.listKnowledge(id),
+          api.listSkills(),
         ]);
         bot = b;
         allCategories = cats;
         entries = kEntries;
+        allSkills = skills;
+        formSkillIds = b.skills ?? [];
 
         formName = b.name;
         formPersonality = b.personality;
@@ -177,6 +195,11 @@
     };
     try {
       await api.updateBot(bot.id, payload);
+      // Skill attachments go through their own endpoint
+      // (Phase 6) — the bot-payload would otherwise have to encode
+      // a list[int] which serialises as JSON inside a JSON body.
+      // See api.updateBotSkills.
+      await api.updateBotSkills(bot.id, formSkillIds);
       bot = await api.getBot(bot.id);
     } catch (e) {
       console.error('Save failed:', e);
@@ -388,6 +411,62 @@
   function goBack() {
     window.location.hash = '#/bots';
   }
+
+  // ── Type-switch confirmation (improve-bot-editor Phase 2) ────────
+  //
+  // See ``specs/bot-editor-type-aware/spec.md`` §Requirement: Type
+  // switch with unsaved changes. The bot-type <Select> emits the new
+  // value through ``onchange`` BEFORE the bind:value write completes
+  // (Select was extended to pass the new value as the first arg).
+  // We intercept that, check whether the change would discard
+  // unsaved RP-only content, and either apply it directly or roll
+  // back + open the modal.
+  let pendingBotType: BotType | null = $state(null);
+
+  function handleBotTypeSelect(newValue: string) {
+    const next = newValue as BotType;
+    const prev = formBotType;
+    if (next === prev) return;
+
+    if (
+      hasHiddenRPContent(prev, {
+        alternate_greetings: formGreetings,
+        dynamic_system_prompt: formDynamicSystemPrompt,
+        first_message: formGreetings[0] ?? '',
+        mes_example: formMesExample,
+        world_state_prompt: formWorldStatePrompt,
+      })
+    ) {
+      formBotType = prev;
+      pendingBotType = next;
+      return;
+    }
+    formBotType = next;
+  }
+
+  function confirmBotTypeSwitch() {
+    if (pendingBotType === null) return;
+    formBotType = pendingBotType;
+    // Clear RP-only fields so the form reflects what the backend
+    // will actually persist.
+    formGreetings = [''];
+    activeGreetingIndex = 0;
+    formScenario = '';
+    formMesExample = '';
+    formWorldStatePrompt = '';
+    // TODO(for-assistant): also reset ``mesExampleOpen = false`` and
+    // any other mes_example editor state on confirm. Today the
+    // mes_example section is NOT wrapped in ``{#if formBotType === 'rp'}``
+    // (see Phase 4 of the change), so the editor can stay visibly
+    // "open" while the form value is empty — minor visual
+    // inconsistency, not a data-loss bug. Punted to v2 with the
+    // mes_example wrapping.
+    pendingBotType = null;
+  }
+
+  function cancelBotTypeSwitch() {
+    pendingBotType = null;
+  }
 </script>
 
 <div class="bot-edit-page">
@@ -486,12 +565,14 @@
     {#if activeTab === 'edit'}
       <section class="edit-section">
         <div class="ray-card">
-          <!-- Bot Type -->
+          <!-- Bot Type — type-switch confirm gated through handleBotTypeSelect.
+               See ``botEditor.ts::hasHiddenRPContent`` for the rule. -->
           <div class="field-group">
             <label class="field-label">{t('bot_create.bot_type', lang)}</label>
             <Select
               bind:value={formBotType}
               options={BOT_TYPES.map((bt) => ({ label: bt.label, value: bt.value }))}
+              onchange={handleBotTypeSelect}
             />
           </div>
 
@@ -523,31 +604,43 @@
             />
           </div>
 
-          <!-- Personality -->
+          <!-- Personality — relabeled "System prompt" for assistant / agent
+               types (the same field semantically IS the system prompt
+               outside of character-card conventions). Required for all
+               types. Backend DTO stays ``personality``. -->
           <div class="field-group">
             <label class="field-label"
-              >{t('bot_create.personality', lang)} <span class="required">*</span></label
+              >{formBotType === 'rp'
+                ? t('bot_create.personality', lang)
+                : t('bot_create.personality_label_non_rp', lang)} <span class="required">*</span></label
             >
             <Textarea
               bind:value={formPersonality}
+              hint={formBotType === 'rp'
+                ? undefined
+                : t('bot_create.personality_hint_non_rp', lang)}
               required
               rows={5}
               placeholder={t('bot_edit.personality_placeholder', lang)}
             />
           </div>
 
-          <!-- Scenario -->
-          <div class="field-group">
-            <label class="field-label">{t('bot_create.scenario', lang)}</label>
-            <Textarea
-              bind:value={formScenario}
-              hint={t('bot_edit.scenario_hint', lang)}
-              rows={6}
-              placeholder={t('bot_edit.scenario_placeholder', lang)}
-            />
-          </div>
+          <!-- Scenario — RP-only (hidden for assistant / agent types). -->
+          {#if formBotType === 'rp'}
+            <div class="field-group">
+              <label class="field-label">{t('bot_create.scenario', lang)}</label>
+              <Textarea
+                bind:value={formScenario}
+                hint={t('bot_edit.scenario_hint', lang)}
+                rows={6}
+                placeholder={t('bot_edit.scenario_placeholder', lang)}
+              />
+            </div>
+          {/if}
 
-          <!-- Greetings — unified tab list (index 0 = first message) -->
+          <!-- Greetings — unified tab list (index 0 = first message).
+               RP-only: hidden for assistant / agent types. -->
+          {#if formBotType === 'rp'}
           <div class="field-group">
             <div class="greetings-header">
               <label class="field-label">{t('bot_edit.greetings', lang)}</label>
@@ -661,6 +754,7 @@
               {/if}
             </div>
           </div>
+          {/if}
 
           <!-- Categories -->
           <div class="field-group">
@@ -668,6 +762,16 @@
               {allCategories}
               selected={formCategories}
               onchange={(cats) => (formCategories = cats)}
+            />
+          </div>
+
+          <!-- Skills — Phase 6 -->
+          <div class="field-group">
+            <SkillPicker
+              allSkills={allSkills}
+              attachedIds={formSkillIds}
+              maxReached={formSkillIds.length >= maxSkillsPerBot}
+              onchange={(ids) => (formSkillIds = ids)}
             />
           </div>
         </div>
@@ -1074,16 +1178,38 @@
           <!-- World-state prompt — system prompt for the background
                task that updates Conversation.state. The bot author
                owns the output format (YAML, JSON, prose). Empty
-               string = no background state generation. -->
-          <div class="field-group">
-            <label class="field-label">{t('bot_edit.world_state_prompt', lang)}</label>
-            <Textarea
-              bind:value={formWorldStatePrompt}
-              rows={6}
-              placeholder="e.g. Emit a YAML block with keys: location, time_of_day, present_characters."
-            />
-          </div>
+               string = no background state generation.
+               RP-only — hidden for assistant / agent types. -->
+          {#if formBotType === 'rp'}
+            <div class="field-group">
+              <label class="field-label">{t('bot_edit.world_state_prompt', lang)}</label>
+              <Textarea
+                bind:value={formWorldStatePrompt}
+                rows={6}
+                placeholder="e.g. Emit a YAML block with keys: location, time_of_day, present_characters."
+              />
+            </div>
+          {/if}
         </div>
+
+        <!-- Type-switch confirmation modal (improve-bot-editor Phase 2).
+             Opens when the user picks a non-RP bot_type while RP-only
+             fields have unsaved content. -->
+        <Modal
+          open={pendingBotType !== null}
+          title={t('bot_edit.confirm_type_switch.title', lang)}
+          onclose={cancelBotTypeSwitch}
+        >
+          <p class="modal-body">{t('bot_edit.confirm_type_switch.body', lang)}</p>
+          <div class="modal-actions">
+            <button class="ray-btn" onclick={cancelBotTypeSwitch}>
+              {t('bot_edit.confirm_type_switch.cancel', lang)}
+            </button>
+            <button class="ray-btn primary" onclick={confirmBotTypeSwitch}>
+              {t('bot_edit.confirm_type_switch.confirm', lang)}
+            </button>
+          </div>
+        </Modal>
       </section>
     {:else if activeTab === 'versions'}
       <section class="edit-section">

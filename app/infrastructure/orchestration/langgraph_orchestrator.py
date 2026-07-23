@@ -17,7 +17,7 @@ from typing import TypedDict
 
 from langgraph.graph import END, StateGraph
 
-from app.application.dto import ConversationRequest
+from app.application.dto import ConversationRequest, SkillDTO
 from app.application.exceptions import ExternalServiceError
 from app.application.ports import BotPreambleProvider, LLMPort
 from app.domain.enums import BotType
@@ -273,10 +273,23 @@ class LangGraphConversationOrchestrator:
     # ── Graph nodes ───────────────────────────────────────────────────
 
     def _node_system_prompt(self, state: OrchestratorState) -> OrchestratorState:
-        """Build system prompt from personality, scenario, and user persona."""
+        """Build system prompt from personality, scenario, user persona, and skills.
+
+        Skills block lands immediately after ``<Persona>/<Scenario>``
+        so the LLM sees behavioural rules in a stable position —
+        before any per-turn injections ([Reminder], [World state]).
+        See spec §7.2 for ordering rationale.
+        """
         request = state["request"]
         bot_type = self._normalize_bot_type(request.bot_type)
         messages = [self._build_system_message(request, bot_type)]
+        # Inject the <Skills>...</Skills> catalog right after persona
+        # (Task 9). The streaming path mirrors this in _build_all_messages
+        # (Task 10) — both go through ``_build_skills_block`` to keep
+        # the format in sync.
+        skills_block = self._build_skills_block(request.skills)
+        if skills_block is not None:
+            messages.append(skills_block)
         return {**state, "messages": messages, "bot_type": bot_type}
 
     def _node_history(self, state: OrchestratorState) -> OrchestratorState:
@@ -356,48 +369,62 @@ class LangGraphConversationOrchestrator:
 
         return {**state, "messages": messages}
 
-    def _node_user_input(self, state: OrchestratorState) -> OrchestratorState:
-        """Append current user input as the final message.
+    def _build_per_turn_injections(self, request: ConversationRequest) -> list[dict[str, str]]:
+        """Build the per-turn system messages that land between the
+        pre-existing bot system message and the new user turn.
 
-        Three optional system messages can land between the
-        pre-existing bot system message and the new user turn,
-        in this order:
+        Three optional injections, in this order:
 
         1. ``[Reminder] <dynamic_system_prompt>`` — fires when the
-           bot has a non-empty ``dynamic_system_prompt``. This
-           closes the loop on instruction drift in long chats
-           where the bot stops following its personality after
-           100+ messages. The ``[Reminder]`` prefix is intentional
-           — it gives the LLM an unambiguous cue that this is a
-           meta-instruction, not a story turn. Without the prefix,
-           reasoning-capable models sometimes treat the
-           meta-instruction as the next dialogue beat and reply to
-           it.
+           bot has a non-empty ``dynamic_system_prompt``. Closes
+           the loop on instruction drift in long chats where the
+           bot stops following its personality after 100+ messages.
+           The ``[Reminder]`` prefix is intentional — it gives the
+           LLM an unambiguous cue that this is a meta-instruction,
+           not a story turn. Without the prefix, reasoning-capable
+           models sometimes treat the meta-instruction as the next
+           dialogue beat and reply to it.
 
-        2. ``[World state from previous turn] <prev_world_state>`` —
-           fires when ``prev_world_state`` is non-empty (i.e. the
-           previous assistant turn in this thread has a stored
-           snapshot). Comes immediately after the reminder so the
-           LLM sees "reminder → world context → user turn" as a
+        2. ``<Skills>...</Skills>`` per-turn safety net — fires
+           when the bot has attached skills. Re-injects the
+           catalog at the end of the prompt so it survives
+           middle-out truncation that drops the early system-prompt
+           block. Content is byte-identical to the initial block
+           (both go through ``_build_skills_block``); identicality
+           is enforced by the
+           ``test_per_turn_skills_block_content_identical_to_initial``
+           regression guard.
+
+        3. ``[World state from previous turn] <prev_world_state>`` —
+           fires when ``prev_world_state`` is non-empty. Comes
+           after the per-turn injections so the LLM sees
+           "reminder → skills → world context → user turn" as a
            single bundle. The ``[World state from previous turn]``
            prefix is a stable marker — the bot author formats the
            contents however they like (YAML, JSON, prose) and the
            prefix makes it clear to the LLM that the block is
            authoritative context, not new dialogue.
 
-        3. The user turn itself, last.
+        Returns the empty list when no per-turn injection is
+        applicable — the caller appends each entry in order.
+
+        Single source of truth for the per-turn sequence. Both
+        prompt-assembly paths (``_node_user_input`` graph path and
+        ``_build_all_messages`` streaming path) call this helper
+        so the two paths stay in sync. See AGENTS.md §2 "parallel
+        paths" rule.
         """
-        request = state["request"]
-        messages = list(state["messages"])
+        out: list[dict[str, str]] = []
         if request.dynamic_system_prompt.strip():
             substituted = self._variable_replace(
                 request.dynamic_system_prompt.strip(), request
             )
-            messages.append(
-                {"role": "system", "content": f"[Reminder] {substituted}"}
-            )
+            out.append({"role": "system", "content": f"[Reminder] {substituted}"})
+        skills_per_turn = self._build_skills_block(request.skills)
+        if skills_per_turn is not None:
+            out.append(skills_per_turn)
         if request.prev_world_state.strip():
-            messages.append(
+            out.append(
                 {
                     "role": "system",
                     "content": (
@@ -406,6 +433,20 @@ class LangGraphConversationOrchestrator:
                     ),
                 }
             )
+        return out
+
+    def _node_user_input(self, state: OrchestratorState) -> OrchestratorState:
+        """Append current user input as the final message.
+
+        All per-turn injections ([Reminder], per-turn [Skills],
+        [World state from previous turn]) are produced by the
+        shared ``_build_per_turn_injections`` helper — see that
+        docstring for the ordering rationale and the truncation
+        argument that motivates the per-turn [Skills] safety net.
+        """
+        request = state["request"]
+        messages = list(state["messages"])
+        messages.extend(self._build_per_turn_injections(request))
         messages.append({"role": "user", "content": request.user_input})
         return {**state, "messages": messages}
 
@@ -499,6 +540,44 @@ class LangGraphConversationOrchestrator:
             "content": "The user uploaded the following files:\n\n" + "\n\n---\n\n".join(parts),
         }
 
+    def _build_skills_block(
+        self, skills: list[SkillDTO]
+    ) -> dict[str, str] | None:
+        """Assemble the ``<Skills>...</Skills>`` system message.
+
+        Single source of truth for the catalog format. Used by BOTH:
+          - ``_node_system_prompt`` (graph path, see Task 9)
+          - ``_build_all_messages`` (streaming path, see Task 10)
+
+        Returns ``None`` when ``skills`` is empty — the caller skips
+        appending entirely. This keeps the system prompt minimal
+        for bots that don't use the feature.
+
+        See spec §7.2.
+        """
+        if not skills:
+            return None
+        lines = [
+            "You have access to the following skills. Each describes a way of behaving or",
+            "formatting your response. Apply a skill when its trigger condition is met.",
+            "Do NOT mention skills you are not applying. Skills do not call external tools —",
+            "they only change how you write.",
+            "",
+        ]
+        for s in skills:
+            desc = s.description.strip()
+            if not desc:
+                # Fallback to truncated instruction — keeps the catalog
+                # concise even when authors leave the short description
+                # blank. 200 chars + ellipsis mirrors the dev-mode
+                # preview length cap in BotSkillDTO. See spec §7.1.
+                desc = s.instruction.strip()[:200].rstrip() + "…"
+            lines.append(f"- **{s.name}** — {desc}")
+        return {
+            "role": "system",
+            "content": "<Skills>\n" + "\n".join(lines) + "\n</Skills>",
+        }
+
     # ── Helpers ───────────────────────────────────────────────────────
 
     @staticmethod
@@ -550,6 +629,13 @@ class LangGraphConversationOrchestrator:
 
         # System prompt
         messages.append(self._build_system_message(request, bot_type))
+
+        # Skills catalog — mirror of the graph path's _node_system_prompt
+        # (Task 9). Must stay in sync via the shared ``_build_skills_block``
+        # helper. See spec §7.2 + AGENTS.md §2 "parallel paths" rule.
+        skills_block = self._build_skills_block(request.skills)
+        if skills_block is not None:
+            messages.append(skills_block)
 
         # V1/V2/V3 `mes_example` — few-shot dialogue examples.
         # Injected as a separate system message between the main system
@@ -610,27 +696,14 @@ class LangGraphConversationOrchestrator:
             if file_msg:
                 messages.append(file_msg)
 
-        # Per-turn injections (mirror of _node_user_input — must stay in sync).
-        # Order matches the graph path exactly so the LLM sees the same
-        # prompt shape whether we go through ``generate`` (graph) or
-        # ``generate_stream`` (this builder).
-        if request.dynamic_system_prompt.strip():
-            substituted = self._variable_replace(
-                request.dynamic_system_prompt.strip(), request
-            )
-            messages.append(
-                {"role": "system", "content": f"[Reminder] {substituted}"}
-            )
-        if request.prev_world_state.strip():
-            messages.append(
-                {
-                    "role": "system",
-                    "content": (
-                        f"[World state from previous turn] "
-                        f"{request.prev_world_state}"
-                    ),
-                }
-            )
+        # Per-turn injections: [Reminder] → per-turn [Skills] →
+        # [World state from previous turn]. Single source of truth
+        # is ``_build_per_turn_injections`` — kept in sync with
+        # ``_node_user_input`` (graph path) via the identicality
+        # test. See that helper's docstring for ordering rationale
+        # and the truncation argument that motivates the per-turn
+        # [Skills] safety net.
+        messages.extend(self._build_per_turn_injections(request))
 
         # User input
         messages.append({"role": "user", "content": request.user_input})

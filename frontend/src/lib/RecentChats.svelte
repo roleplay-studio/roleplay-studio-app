@@ -243,7 +243,7 @@
                 <!-- Content -->
                 <div class="rc-content">
                   <div class="rc-top">
-                    <span class="rc-name">{thread.persona_name ?? thread.bot_name}</span>
+                    <span class="rc-name">{thread.name}</span>
                     <span class="rc-time">{formatTime(thread.last_message_at)}</span>
                   </div>
 

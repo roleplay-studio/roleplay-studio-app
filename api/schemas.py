@@ -23,6 +23,7 @@ class UpdateConfigRequest(BaseModel):
     context_compression_enabled: bool | None = None
     context_compression_threshold: int | None = None
     context_compression_keep_recent: int | None = None
+    format_standart_rp_enabled: bool | None = None
     # Cap on messages loaded from the DB for the LLM context.
     # ``None`` leaves the existing value alone so the Settings page
     # can omit it from its PATCH (saves don't overwrite fields the
@@ -84,9 +85,16 @@ class EditMessageRequest(BaseModel):
 
 
 class ConfigureRequest(BaseModel):
+    # ``api_key`` is nullable: the Settings page sends ``null`` when
+    # the field is blank (the user didn't type a new key — the
+    # placeholder "••••" indicates a configured key but never
+    # round-trips). ``null`` / missing are both "no change" — the
+    # route must NOT touch LLM_API_KEY in .env. An explicit empty
+    # string ``""`` is the legacy "clear the key" path (kept for
+    # backwards compat with the original wizard behaviour).
     provider: str = "openrouter"
     base_url: str = ""
-    api_key: str = ""
+    api_key: str | None = None
     chat_model: str = ""
 
     @model_validator(mode="before")

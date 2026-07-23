@@ -1,6 +1,7 @@
 """Chat service — orchestrates conversation generation with context, memory, persona, and branching support."""
 
 import asyncio
+import json
 import logging
 import uuid as uuid_lib
 from collections.abc import AsyncGenerator
@@ -13,6 +14,7 @@ from app.application.dto import (
     LLMDebugInfo,
     MessageDTO,
     SendMessageCommand,
+    SkillDTO,
 )
 from app.application.exceptions import ExternalServiceError, NotFoundError
 from app.application.ports import (
@@ -27,10 +29,63 @@ from app.application.ports import (
     ThreadRepository,
 )
 from app.application.services.message_summarizer import MessageSummarizer
+from app.application.services.skill import SkillService
 from app.domain.enums import BotType
 from app.infrastructure.config import Settings
 
 logger = logging.getLogger(__name__)
+
+
+def _format_exception_detail(exc: BaseException) -> str:
+    """Render an exception as a user-visible detail string.
+
+    Mirrors ``api.routes.chat._describe_error`` — the same type +
+    ``__cause__`` walking logic, plus a short ``request_id`` so the
+    user can quote it in a support ticket and we can grep the
+    backend log for the matching traceback.
+
+    The ``request_id`` is generated per-call (NOT pulled from a
+    contextvar) because the application layer doesn't have access
+    to the HTTP request scope. The chat.py raise site calls this
+    once per failure; the route layer adds the SAME id to the
+    response body so both sides can cross-reference. The id is
+    also logged at the raise site, so a grep on the id surfaces
+    both the service-level exception and the route-level handler
+    line.
+
+    Walk the cause chain to surface the underlying ``OSError``
+    (which still carries ``[Errno N] reason`` on POSIX) and the
+    configured ``LLM_BASE_URL`` so the chat UI can sanity-check
+    the configured endpoint from the alert alone.
+    """
+    type_name = type(exc).__name__
+    parts: list[str] = [type_name, str(exc) or repr(exc)]
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if isinstance(cur, OSError) and cur is not exc:
+            parts.append(f"({type(cur).__name__}: {cur})")
+            break
+        cur = cur.__cause__ or cur.__context__
+
+    detail = ": ".join(parts)
+    try:
+        from app.infrastructure.config import Settings
+
+        base = Settings.from_env().llm_base_url
+        if base:
+            detail = f"{detail} (target: {base})"
+    except Exception:
+        pass
+
+    # Short id (8 hex chars) is plenty for cross-referencing logs.
+    # 32 bits of entropy is overkill for log correlation but cheap
+    # to generate. We use uuid4 because stdlib uuid is already
+    # imported (line 6) — no new dependency.
+    request_id = uuid_lib.uuid4().hex[:8]
+    detail = f"{detail} [ref: {request_id}]"
+    return detail
 
 
 class _NullMarkdownRepairer:
@@ -51,6 +106,8 @@ def _repair_for_rp(
     repairer: MarkdownRepairer,
     bot_type: BotType | str | None,
     text: str,
+    *,
+    enabled: bool = True,
 ) -> str:
     """Run ``repairer.repair(text)`` only if ``bot_type`` is RP.
 
@@ -80,7 +137,7 @@ def _repair_for_rp(
         normalised = bot_type.value.lower()
     else:
         return text
-    if normalised != BotType.RP.value:
+    if normalised != BotType.RP.value or not enabled:
         return text
     return repairer.repair(text)
 
@@ -100,6 +157,7 @@ class ChatService:
         files: ThreadFileRepository | None = None,
         summarizer: MessageSummarizer | None = None,
         markdown_repairer: MarkdownRepairer | None = None,
+        skill_service: SkillService | None = None,
     ):
         self._bots = bots
         self._messages = messages
@@ -125,6 +183,11 @@ class ChatService:
         # the pre-fix behaviour for tests that don't bother wiring
         # two providers).
         self._llm = llm
+        # Optional — skills resolution happens in ``_build_request``.
+        # When ``None``, bots that reference skills get an empty list
+        # and the orchestrator skips the <Skills> block. Bootstrap
+        # passes the global SkillService (Phase 2 / Task 12).
+        self._skill_service = skill_service
         self._fast_llm: LLMPort | None = fast_llm
         self._files = files
         self._summarizer = summarizer
@@ -133,7 +196,9 @@ class ChatService:
         # format-standart-rp library installed. Production wiring
         # in app.bootstrap.py always passes a real implementation.
         self._markdown_repairer: MarkdownRepairer = (
-            markdown_repairer if markdown_repairer is not None else _NullMarkdownRepairer()
+            markdown_repairer
+            if markdown_repairer is not None and self._settings.format_standart_rp_enabled
+            else _NullMarkdownRepairer()
         )
         # NOTE: the old `_first_message_saved: set[int]` in-memory
         # registry was removed (K4 in docs/review.md). It had three
@@ -212,7 +277,9 @@ class ChatService:
         await self._messages.save_exchange(command.thread_id, command.user_input, response)
         return ChatResponse(content=response)
 
-    async def stream_save_first_message(self, thread_id: int, bot_id: int) -> None:
+    async def stream_save_first_message(
+        self, thread_id: int, bot_id: int, persona_name: str | None = None
+    ) -> None:
         """Save the bot's first_message as the initial message in a thread.
 
         Idempotency strategy (RC1.2 in docs/review.md): delegate the
@@ -226,20 +293,57 @@ class ChatService:
         (added in Sprint 1) were both racy under aiosqlite; this
         repository-level atomicity closes the gap without adding
         SELECT-then-INSERT window.
+
+        ``{{user}}`` substitution
+        -------------------------
+        ``bot.first_message`` may contain ``{{user}}`` template tokens
+        that the orchestrator's ``_variable_replace`` substitutes at
+        prompt-assembly time. Before this fix, the raw template was
+        persisted to the DB verbatim, so the literal ``{{user}}`` token
+        leaked into:
+
+        * the rebuilt history on every subsequent turn
+        * any future ``regenerate`` / ``retry`` that reads the saved row
+        * the visible message in the chat panel (LLMDebugModal)
+
+        We substitute the persona name inline here when one is
+        provided so the persisted row is the same text the LLM
+        actually saw on the first turn. ``None`` / empty string is a
+        no-op: the orchestrator will substitute on the first turn
+        and the placeholder survives in the DB so a later persona
+        change can still re-substitute without the old name being
+        baked in.
         """
         bot = await self._bots.get(bot_id)
         if bot is None or not bot.first_message:
             return
-        await self._messages.save_first_assistant_if_absent(thread_id, bot.first_message)
+        content = bot.first_message
+        if persona_name:  # non-empty string only
+            content = content.replace("{{user}}", persona_name)
+        await self._messages.save_first_assistant_if_absent(thread_id, content)
 
     # ── Section 2: Streaming core (the LLM call path) ──────────────
 
     async def stream_message(self, command: SendMessageCommand) -> AsyncGenerator[ChatChunk]:
-        # 1. Save first_message FIRST if this is a new thread
+        # 1. Save first_message FIRST if this is a new thread.
         # This ensures correct order in DB: first_message → user → assistant
         # (files need user message_id, so we save user after first_message)
+        #
+        # We resolve the user persona up front so the first_message
+        # row is persisted with ``{{user}}`` already substituted —
+        # otherwise the literal token would leak into the rebuilt
+        # history on every subsequent turn (and any future
+        # regenerate / retry). See ``stream_save_first_message``
+        # for the substitution semantics.
         if command.bot_id is not None:
-            await self.stream_save_first_message(command.thread_id, command.bot_id)
+            persona_name: str | None = None
+            if command.persona_id is not None and self._personas is not None:
+                persona = await self._personas.get(command.persona_id)
+                if persona is not None:
+                    persona_name = persona.name
+            await self.stream_save_first_message(
+                command.thread_id, command.bot_id, persona_name=persona_name
+            )
 
         # Resolve bot_type up-front so the markdown repair call below
         # (in the CancelledError/Exception handlers and the success
@@ -343,7 +447,12 @@ class ChatService:
             response = "".join(content_chunks)
             full_reasoning = "".join(reasoning_chunks)
             if response:
-                response = _repair_for_rp(self._markdown_repairer, bot_type, response)
+                response = _repair_for_rp(
+                    self._markdown_repairer,
+                    bot_type,
+                    response,
+                    enabled=self._settings.format_standart_rp_enabled,
+                )
                 await self._messages.save(
                     command.thread_id,
                     "assistant",
@@ -369,12 +478,17 @@ class ChatService:
             # we don't have here. See docs/review.md m4 for the
             # full discussion.
             logger.exception("Streaming chat generation failed")
-            raise ExternalServiceError("Failed to generate assistant response") from exc
+            raise ExternalServiceError(_format_exception_detail(exc)) from exc
 
         response = "".join(content_chunks)
         full_reasoning = "".join(reasoning_chunks)
         if response:
-            response = _repair_for_rp(self._markdown_repairer, bot_type, response)
+            response = _repair_for_rp(
+                self._markdown_repairer,
+                bot_type,
+                response,
+                enabled=self._settings.format_standart_rp_enabled,
+            )
             assistant_msg_id = await self._messages.save(
                 command.thread_id,
                 "assistant",
@@ -1271,7 +1385,12 @@ class ChatService:
             response = "".join(content_chunks)
             full_reasoning = "".join(reasoning_chunks)
             if response:
-                response = _repair_for_rp(self._markdown_repairer, bot_type, response)
+                response = _repair_for_rp(
+                    self._markdown_repairer,
+                    bot_type,
+                    response,
+                    enabled=self._settings.format_standart_rp_enabled,
+                )
                 await self._messages.save_branch(
                     thread_id,
                     "assistant",
@@ -1287,7 +1406,7 @@ class ChatService:
                 )
             yield {"type": "stopped"}
             return
-        except Exception:
+        except Exception as exc:
             # m5: any failure → yield a structured error event
             # so the frontend can surface it. Broad catch because
             # the LLM stream path can fail in many ways (httpx
@@ -1296,13 +1415,18 @@ class ChatService:
             # by the explicit ``except CancelledError:`` block above
             # (yields "stopped"), so we don't need to re-raise here.
             logger.exception("Branch regeneration failed")
-            yield {"type": "error", "detail": "Failed to generate assistant response"}
+            yield {"type": "error", "detail": _format_exception_detail(exc)}
             return
 
         response = "".join(content_chunks)
         full_reasoning = "".join(reasoning_chunks)
         if response:
-            response = _repair_for_rp(self._markdown_repairer, bot_type, response)
+            response = _repair_for_rp(
+                self._markdown_repairer,
+                bot_type,
+                response,
+                enabled=self._settings.format_standart_rp_enabled,
+            )
             new_id = await self._messages.save_branch(
                 thread_id,
                 "assistant",
@@ -1423,24 +1547,34 @@ class ChatService:
             # User-initiated abort — persist the partial with status='stopped'.
             response = "".join(chunks)
             if response:
-                response = _repair_for_rp(self._markdown_repairer, bot_type, response)
+                response = _repair_for_rp(
+                    self._markdown_repairer,
+                    bot_type,
+                    response,
+                    enabled=self._settings.format_standart_rp_enabled,
+                )
                 await self._messages.save(
                     thread_id, "assistant", response, generation_status="stopped"
                 )
             yield {"type": "stopped"}
             return
-        except Exception:
+        except Exception as exc:
             # m5: see _regenerate_message_stream — broad catch
             # because the LLM stream path can fail in many ways.
             # ``CancelledError`` is handled by the explicit branch
             # above.
             logger.exception("Retry message generation failed")
-            yield {"type": "error", "detail": "Failed to generate assistant response"}
+            yield {"type": "error", "detail": _format_exception_detail(exc)}
             return
 
         response = "".join(chunks)
         if response:
-            response = _repair_for_rp(self._markdown_repairer, bot_type, response)
+            response = _repair_for_rp(
+                self._markdown_repairer,
+                bot_type,
+                response,
+                enabled=self._settings.format_standart_rp_enabled,
+            )
             await self._messages.save(
                 thread_id, "assistant", response, generation_status="complete"
             )
@@ -1585,6 +1719,28 @@ class ChatService:
                 prev_world_state = candidate
                 break
 
+        # Resolve Bot.skill_ids → SkillDTO list for the orchestrator.
+        # Defensive against:
+        # 1. Missing skill_service (older bootstrap path) → empty list
+        # 2. Corrupted Bot.skill_ids (hand-edited DB) → log + empty
+        # 3. Orphan IDs (skill was deleted but bot.skill_ids still
+        #    references it) → silently dropped by the service.
+        # The orchestrator treats an empty list as "no <Skills> block"
+        # — see ``_build_skills_block`` returning None. See spec §7.3.
+        skills: list[SkillDTO] = []
+        try:
+            raw_skill_ids = getattr(bot, "skill_ids", "[]") or "[]"
+            bot_skill_ids = json.loads(raw_skill_ids)
+        except (json.JSONDecodeError, TypeError):
+            logger.warning(
+                "[chat-build] bot %s has malformed skill_ids=%r; treating as empty",
+                command.bot_id,
+                getattr(bot, "skill_ids", None),
+            )
+            bot_skill_ids = []
+        if bot_skill_ids and self._skill_service is not None:
+            skills = await self._skill_service.list_for_bot_with_ids(bot_skill_ids)
+
         return ConversationRequest(
             thread_id=command.thread_id,
             bot_id=command.bot_id,
@@ -1618,6 +1774,10 @@ class ChatService:
                 getattr(bot, "world_state_prompt", "") or "" if bot_type == BotType.RP else ""
             ),
             prev_world_state=(prev_world_state if bot_type == BotType.RP else ""),
+            # Resolved SkillDTO list for the orchestrator's <Skills> block.
+            # Empty when bot has no attached skills OR no skill_service
+            # wired (graceful degradation). See Phase 4 / Task 11.
+            skills=skills,
         )
 
     # ── Section 8: Branch-aware deletion helpers ─────────────────────

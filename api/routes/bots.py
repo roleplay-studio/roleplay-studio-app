@@ -1,5 +1,6 @@
 """Bot CRUD routes."""
 
+import json
 import os
 import uuid
 from pathlib import Path
@@ -27,10 +28,13 @@ from api.upload_utils import read_upload_file_limited, save_upload_file_limited
 from app.application.dto import (
     AddKnowledgeEntryCommand,
     BotResponse,
+    BotSkillDTO,
     BotVersionDTO,
     CreateBotCommand,
+    SkillDTO,
     ThreadDTO,
     UpdateBotCommand,
+    UpdateBotSkillsCommand,
 )
 from app.application.exceptions import NotFoundError
 from app.application.services.bot_version import to_dto
@@ -151,8 +155,21 @@ async def list_bots(container: ContainerDep):
         if settings_svc is not None
         else None
     )
+    # Resolve live skill IDs so BotResponse.skills_invalid is populated
+    # for orphan refs (a skill that was deleted but bot.skill_ids still
+    # points at). Graceful degradation: when the skill service is
+    # missing, valid_skill_ids is None and skills_invalid stays empty.
+    # See skill-api OCR review finding 2026-07-17 (CRITICAL).
+    valid_skill_ids: set[int] | None = None
+    if getattr(container, "skills", None) is not None:
+        valid_skill_ids = await container.skills.list_all_skill_ids()
     return [
-        BotResponse.from_orm_bot(bot, count, valid_categories=valid_categories)
+        BotResponse.from_orm_bot(
+            bot,
+            count,
+            valid_categories=valid_categories,
+            valid_skill_ids=valid_skill_ids,
+        )
         for bot, count in bots_with_counts
     ]
 
@@ -180,8 +197,15 @@ async def get_bot(bot_id: int, container: ContainerDep):
             if settings_svc is not None
             else None
         )
+        # Skill cross-reference for skills_invalid (OCR review 2026-07-17).
+        valid_skill_ids: set[int] | None = None
+        if getattr(container, "skills", None) is not None:
+            valid_skill_ids = await container.skills.list_all_skill_ids()
         return BotResponse.from_orm_bot(
-            bot, thread_count, valid_categories=valid
+            bot,
+            thread_count,
+            valid_categories=valid,
+            valid_skill_ids=valid_skill_ids,
         )
     except NotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
@@ -525,12 +549,40 @@ async def create_thread(
 ):
     persona_id = body.persona_id if body else None
     thread_id = await container.threads.create_thread(bot_id, persona_id=persona_id)
-    # Save first_message immediately so it appears in the thread on load
+    # Save first_message immediately so it appears in the thread on load.
+    # We also substitute ``{{user}}`` inline so the persisted row
+    # doesn't leak the literal placeholder into the rebuilt history
+    # on every subsequent turn (see ChatService.stream_save_first_message
+    # for the substitution semantics). Without this, the orchestrator
+    # path that goes through ``stream_message`` is fine on the first
+    # turn (it substitutes in-flight) but the DB row keeps the raw
+    # ``{{user}}`` token, so any future regenerate / retry / re-read
+    # from history leaks it.
     try:
         if container.chat is not None:
             bot = await container.bots.get_bot(bot_id)
             if bot and bot.first_message:
-                await container.chat.stream_save_first_message(thread_id, bot_id)
+                # Resolve the persona up front so the first_message
+                # row is persisted with ``{{user}}`` already substituted.
+                # A bad / missing persona id is silently treated as
+                # "no persona" — the orchestrator will substitute on
+                # the first turn instead.
+                persona_name: str | None = None
+                if persona_id is not None and container.personas is not None:
+                    try:
+                        persona = await container.personas.get(persona_id)
+                    except Exception:
+                        # NotFoundError from PersonaService.get (the
+                        # persona was deleted between picker and save),
+                        # or any other repo failure. Fall through to
+                        # "no persona" rather than failing the whole
+                        # thread creation.
+                        persona = None
+                    if persona is not None:
+                        persona_name = persona.name
+                await container.chat.stream_save_first_message(
+                    thread_id, bot_id, persona_name=persona_name
+                )
     except Exception:
         pass
     return {"id": thread_id}
@@ -562,3 +614,57 @@ async def import_chat(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
 
     return {"ok": True, "thread_id": result.thread_id, "message_count": result.message_count}
+
+
+# ── Per-bot skills: /api/bots/{bot_id}/skills ──────────────────
+
+
+@router.get("/{bot_id}/skills", response_model=list[SkillDTO])
+async def list_bot_skills(bot_id: int, container: ContainerDep):
+    """List the resolved skills attached to a bot.
+
+    Returns the full ``SkillDTO`` (with ``instruction``) for each
+    attached skill, in id-ASC order. Orphan IDs (where the underlying
+    ``GlobalSkill`` was deleted) are silently skipped (see spec §6.2).
+    """
+    if container.skills is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Skills service unavailable",
+        )
+    # Verify bot exists first — the service-level resolve returns
+    # empty for unknown bots which would otherwise silently 200 with [].
+    bot = await container.bots.get_bot(bot_id)
+    if bot is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail=f"Bot {bot_id} not found"
+        )
+    skill_ids = json.loads(getattr(bot, "skill_ids", "[]") or "[]")
+    return await container.skills.list_for_bot_with_ids(skill_ids)
+
+
+@router.put("/{bot_id}/skills")
+async def update_bot_skills(
+    bot_id: int,
+    body: UpdateBotSkillsCommand,
+    container: ContainerDep,
+) -> dict:
+    """Replace the bot's skill list with the supplied IDs.
+
+    Returns the resolved ``BotSkillDTO`` list (without ``instruction``)
+    so the frontend can update the chips without a second round-trip.
+    Validation (limit, existence) lives in the service layer.
+    """
+    if container.skills is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Skills service unavailable",
+        )
+    skills = await container.skills.update_bot_skills(bot_id, body.skill_ids)
+    return {
+        "ok": True,
+        "skills": [
+            BotSkillDTO(id=s.id, name=s.name, description=s.description)
+            for s in skills
+        ],
+    }

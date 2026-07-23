@@ -2,7 +2,7 @@
 
 Two implementations of ``TTSProvider`` (defined in ``app.application.ports``):
 
-* :class:`MiniMaxTTSProvider` — talks to ``https://api.minimaxi.com/v1/t2a_v2``
+* :class:`MiniMaxTTSProvider` — talks to ``https://api.minimax.io/v1/t2a_v2``
   over HTTPS via ``httpx``. Production path; requires
   ``TTS_PROVIDER=minimax`` plus ``TTS_API_KEY`` (or ``LLM_API_KEY`` fallback).
 * :class:`MockTTSProvider` — in-process deterministic simulator that returns
@@ -59,7 +59,7 @@ class MiniMaxTTSResponse:
 
 
 class MiniMaxTTSProvider:
-    """HTTP client for ``https://api.minimaxi.com/v1/t2a_v2``.
+    """HTTP client for ``https://api.minimax.io/v1/t2a_v2``.
 
     Matches the ``TTSProvider`` protocol surface (see
     ``app.application.ports``). Lifecycle follows the LLM pattern:

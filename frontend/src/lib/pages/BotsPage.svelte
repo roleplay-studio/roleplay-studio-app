@@ -1,8 +1,14 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
 
-  import { api, type Bot } from '../api';
+  import { api, type Bot, type BotType } from '../api';
   import BotCard from '../BotCard.svelte';
+  import {
+    applyBotsFilters,
+    type BotSortDir,
+    type BotSortKey,
+  } from '../botsBrowse';
+  import BotsToolbar from '../BotsToolbar.svelte';
   import { currentLang, t } from '../i18n';
   import { Loading } from '../ui';
   import { isSupportedBotFile } from './bots-dnd';
@@ -76,6 +82,24 @@
 
   let bots: Bot[] = $state([]);
   let loading = $state(true);
+
+  // Toolbar state (introduced by improve-bot-editor). Default sort is
+  // ``id desc`` which is the chronological proxy for created_at
+  // (created_at is NOT on BotResponse per design.md Q1). The toolbar
+  // is a controlled component — these are the source of truth, and
+  // BotsToolbar reads/writes them via callbacks.
+  let sortKey: BotSortKey = $state('id');
+  let sortDir: BotSortDir = $state('desc');
+  let activeTypes: BotType[] = $state([]);
+  let query: string = $state('');
+
+  // Filtered + sorted view of the bot list. Pure derivation over the
+  // raw ``bots`` + toolbar state via the botsBrowse helpers. The
+  // template renders ``visibleBots`` instead of ``bots`` so the
+  // toolbar's effects are visible immediately.
+  let visibleBots: Bot[] = $derived(
+    applyBotsFilters(bots, { query, sortDir, sortKey, types: activeTypes }),
+  );
 
   onMount(() => {
     unsubLang = currentLang.subscribe((v) => (lang = v));
@@ -281,6 +305,31 @@
     <div class="bots-error">{importError}</div>
   {/if}
 
+  <!-- Toolbar: sort / type-filter / name-search. The toolbar owns no
+       state of its own; it forwards user input to the callbacks which
+       update the ``$state`` defined above, and the ``visibleBots``
+       derivation re-runs to refresh the grid. -->
+  {#if !loading && bots.length > 0}
+    <BotsToolbar
+      activeTypes={activeTypes}
+      onqueryChange={(q) => (query = q)}
+      onsortChange={(k, d) => {
+        sortKey = k;
+        sortDir = d;
+      }}
+      ontypesChange={(t) => (activeTypes = t)}
+      {query}
+      {sortDir}
+      {sortKey}
+    />
+    <div class="bots-results-count text-xs text-rp-text-secondary">
+      {t('bot_library.results_count', lang, {
+        count: visibleBots.length,
+        total: bots.length,
+      })}
+    </div>
+  {/if}
+
   {#if loading}
     <div class="loading-wrap">
       <Loading size="lg" />
@@ -298,9 +347,17 @@
       <p class="empty-title">{t('bots.no_bots', lang)}</p>
       <p class="empty-hint">{t('bots.no_bots_hint', lang)}</p>
     </div>
+  {:else if visibleBots.length === 0}
+    <!-- Toolbar is visible above; here we explain the empty result
+         caused by the active filter rather than the underlying empty
+         library. Distinct from ``bots.length === 0`` because the
+         actions differ (clear filters vs. create a new bot). -->
+    <div class="bots-empty">
+      <p class="empty-title">{t('bot_library.empty_state', lang)}</p>
+    </div>
   {:else}
     <div class="bots-grid">
-      {#each bots as bot (bot.id)}
+      {#each visibleBots as bot (bot.id)}
         <BotCard
           {bot}
           showActions
@@ -596,6 +653,44 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
     gap: 12px;
+  }
+
+  /* ─── Results count (above the grid, below the toolbar) ─── */
+  .bots-results-count {
+    margin: 4px 0 12px;
+  }
+
+  /*
+   * Mobile chip-row mask: per MOBILE_PLAN.md Phase 5, the filter chip
+   * row in BotsToolbar scrolls horizontally on narrow viewports with
+   * a fade mask that hints at overflow. The toolbar's chip section
+   * already uses flex-wrap, but on <480px viewports the row is too
+   * wide to wrap cleanly — overflow-x gives the scrollbar a place to
+   * live. The mask lives on the wrapping section so the search input
+   * below stays full-width.
+   *
+   * TODO(for-assistant): nth-of-type(2) is fragile — it relies on
+   * BotsToolbar's section order being (sort, filter, search). If the
+   * toolbar ever adds a 4th section before the filter chips, this
+   * selector silently breaks. Replacement plan: add a stable class
+   * like ``bots-toolbar-filter-section`` to the wrapping <div> in
+   * BotsToolbar.svelte and target it directly here. Tracked for the
+   * next refactor pass; no live bug.
+   */
+  @media (max-width: 767.98px) {
+    :global(.bots-toolbar .bots-toolbar-section:nth-of-type(2)) {
+      overflow-x: auto;
+      scrollbar-width: none;
+      mask-image: linear-gradient(
+        to right,
+        black 0,
+        black calc(100% - 24px),
+        transparent 100%
+      );
+    }
+    :global(.bots-toolbar .bots-toolbar-section:nth-of-type(2)::-webkit-scrollbar) {
+      display: none;
+    }
   }
 
   /* ─── Drop hint (always-visible card-shaped placeholder) ─── */

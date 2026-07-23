@@ -143,6 +143,7 @@ export interface AppConfig {
    *  the System section in Settings to flag dev-mode explicitly. */
   environment: string;
   fast_model: string;
+  format_standart_rp_enabled: boolean;
   history_limit: number;
   knowledge_relevance_threshold: number;
   language: string;
@@ -193,11 +194,29 @@ export interface Bot {
   name: string;
   personality: string;
   scenario: string;
+  /** Ids of GlobalSkill rows attached to this bot (Claude/Anthropic
+   *  Skills feature). Slim — just the integers, no instruction body.
+   *  The full SkillDTO list comes from `api.listBotSkills(botId)`. */
+  skills?: number[];
+  /** Subset of `skills` that no longer resolve to a live GlobalSkill
+   *  (skill was deleted but bot.skill_ids still points at it). UI
+   *  surfaces these as stale-chips like `categories_invalid`. */
+  skills_invalid?: number[];
   thread_count: number;
   /** System prompt for the background state-update task. The bot
    *  developer owns the output format via this prompt. Empty string =
    *  no background state generation. */
   world_state_prompt?: string;
+}
+
+/** Lightweight skill projection embedded in `BotResponse.skills`.
+ *  Excludes `instruction` to keep the bot-list payload small. The
+ *  chip in the BotEditPage Skills section uses `description` as a
+ *  tooltip. */
+export interface BotSkillDTO {
+  description: string;
+  id: number;
+  name: string;
 }
 
 /** The shape of the serialized bot inside a version snapshot. Mirrors
@@ -229,6 +248,18 @@ export interface BotVersion {
   snapshot: BotSnapshot | null;
   source: 'auto' | 'manual';
   version_number: number;
+}
+
+/** POST /api/skills body. See spec §5.1. */
+export interface CreateSkillCommand {
+  /** Optional — empty by default. ≤300 chars. */
+  description?: string;
+  /** Required, non-empty after trim, ≤64 chars. */
+  instruction: string;
+  /** Required, non-empty after trim, ≤64 chars. */
+  name: string;
+  /** Tag list — normalised server-side (lower / strip / dedup). */
+  tags?: string[];
 }
 
 export interface KnowledgeEntry {
@@ -296,6 +327,7 @@ export interface Persona {
 }
 
 export interface RecentThread {
+  name: string;
   bot_avatar_path: null | string;
   bot_categories: string[];
   bot_id: number;
@@ -314,17 +346,6 @@ export interface RecentThread {
   thread_id: number;
 }
 
-/** Header-level stats from `GET /api/threads/{id}/stats`.
- *
- * Distinct from `listMessages` — `message_count` is the real full-thread
- * total (including older pages), independent of the 50-message pagination
- * window the chat UI fetches. The chat header binds to this, never to the
- * length of the locally-loaded messages array.
- */
-// (Defined further down so the file remains alpha-sorted by interface
-// name for ESLint perfectionist's sort-modules rule. The interface
-// itself is the same; see chat header binding for usage.)
-
 export interface ReindexJobState {
   bots_done: number;
   current_bot_entries_done: number;
@@ -341,10 +362,35 @@ export interface ReindexJobState {
 
 export type ReindexJobStatus = 'cancelled' | 'completed' | 'failed' | 'pending' | 'running';
 
+/** Header-level stats from `GET /api/threads/{id}/stats`.
+ *
+ * Distinct from `listMessages` — `message_count` is the real full-thread
+ * total (including older pages), independent of the 50-message pagination
+ * window the chat UI fetches. The chat header binds to this, never to the
+ * length of the locally-loaded messages array.
+ */
+// (Defined further down so the file remains alpha-sorted by interface
+// name for ESLint perfectionist's sort-modules rule. The interface
+// itself is the same; see chat header binding for usage.)
+
 export interface ReindexStartResponse {
   job_id: null | string;
   ok: boolean;
   stale_bots: number[];
+}
+
+/** Skills — Claude/Anthropic style reusable instructions. See spec §5.1. */
+export interface SkillDTO {
+  created_at: string;
+  description: string;
+  id: number;
+  /** Full markdown body. Carries the real prompt — can be large
+   *  (up to 4000 chars per the backend limit). The lightweight
+   *  `BotSkillDTO` projection excludes this for BotResponse payloads. */
+  instruction: string;
+  name: string;
+  tags: string[];
+  updated_at: string;
 }
 
 export interface Thread {
@@ -396,14 +442,30 @@ export interface ThreadStats {
   token_estimate: number;
 }
 
+/** PUT /api/skills/{id} body. All fields optional — only supplied
+ *  fields are touched server-side. */
+export interface UpdateSkillCommand {
+  description?: null | string;
+  instruction?: null | string;
+  name?: null | string;
+  tags?: null | string[];
+}
+
 export class ApiError extends Error {
+  /** For 409 Conflict responses: list of bot IDs that reference the
+   *  resource (used by SkillService.delete_skill). Empty / undefined
+   *  for non-conflict responses. */
+  attached_to?: number[];
   detail: string;
   status: number;
-  constructor(status: number, detail: string) {
+  constructor(status: number, detail: string, attachedTo?: number[]) {
     super(`API ${status}: ${detail}`);
     this.status = status;
     this.detail = detail;
     this.name = 'ApiError';
+    if (attachedTo !== undefined) {
+      this.attached_to = attachedTo;
+    }
   }
 }
 
@@ -475,14 +537,18 @@ export const api = {
   // Config
   config: () => request<AppConfig>('/api/config'),
   createBot: (data: {
+    alternate_greetings?: string[];
     avatar_path?: null | string;
     bot_type?: BotType;
     categories?: string[];
     description?: string;
+    dynamic_system_prompt?: string;
     first_message: string;
+    mes_example?: string;
     name: string;
     personality: string;
     scenario?: string;
+    world_state_prompt?: string;
   }) => request<{ id: number }>('/api/bots', { body: JSON.stringify(data), method: 'POST' }),
   createBotVersion: (botId: number, note: string) =>
     request<BotVersion>(`/api/bots/${botId}/versions`, {
@@ -491,12 +557,17 @@ export const api = {
     }),
   createPersona: (data: { avatar_path?: null | string; description?: string; name: string }) =>
     request<{ id: number }>('/api/personas', { body: JSON.stringify(data), method: 'POST' }),
+  createSkill: (data: CreateSkillCommand) =>
+    request<{ id: number }>('/api/skills', {
+      body: JSON.stringify(data),
+      method: 'POST',
+    }),
+
   createThread: (botId: number, personaId?: null | number) =>
     request<{ id: number }>(`/api/bots/${botId}/threads`, {
       body: JSON.stringify({ persona_id: personaId ?? null }),
       method: 'POST',
     }),
-
   deleteBot: (id: number) => request<{ ok: boolean }>(`/api/bots/${id}`, { method: 'DELETE' }),
   deleteBotVersion: (botId: number, versionId: number) =>
     request<{ ok: boolean }>(`/api/bots/${botId}/versions/${versionId}`, {
@@ -508,6 +579,7 @@ export const api = {
     }),
   deleteFile: (threadId: number, fileId: number) =>
     request<{ ok: boolean }>(`/api/threads/${threadId}/files/${fileId}`, { method: 'DELETE' }),
+
   deleteKnowledge: (botId: number, entryId: string) =>
     request<{ ok: boolean }>(`/api/knowledge/${botId}/${entryId}`, { method: 'DELETE' }),
 
@@ -519,13 +591,34 @@ export const api = {
 
   deleteLastMessage: (threadId: number) =>
     request<{ ok: boolean }>(`/api/threads/${threadId}/messages/last`, { method: 'DELETE' }),
-
   deleteMessage: (threadId: number, messageId: number) =>
     request<{ ok: boolean }>(`/api/threads/${threadId}/messages/${messageId}`, {
       method: 'DELETE',
     }),
   deletePersona: (id: number) =>
     request<{ ok: boolean }>(`/api/personas/${id}`, { method: 'DELETE' }),
+  /** Returns true on success, throws ApiError(409) with body.attached_to
+   *  when the skill is still in use by one or more bots. */
+  deleteSkill: async (id: number): Promise<boolean> => {
+    const res = await fetch(`${apiBase()}/api/skills/${id}`, { method: 'DELETE' });
+    if (res.status === 204) return true;
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        const body = await res.json();
+        detail = body.detail || detail;
+        // Preserve attached_to on the error so callers can surface it.
+        if (res.status === 409 && Array.isArray(body.attached_to)) {
+          throw new ApiError(res.status, detail, body.attached_to);
+        }
+      } catch (err) {
+        if (err instanceof ApiError) throw err;
+        /* JSON parse failed — fall through with HTTP detail */
+      }
+      throw new ApiError(res.status, detail);
+    }
+    return true;
+  },
   deleteThread: (id: number) =>
     request<{ ok: boolean }>(`/api/threads/${id}`, { method: 'DELETE' }),
   // ── Bot Export / Import ────────────────────────────────────────────
@@ -553,6 +646,7 @@ export const api = {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   },
+
   // ── Chat Import / Export ────────────────────────────────────────────
   exportChat: async (threadId: number) => {
     const res = await fetch(`${apiBase()}/api/threads/${threadId}/export`, {
@@ -598,6 +692,7 @@ export const api = {
       body: JSON.stringify({ message_id: messageId }),
       method: 'POST',
     }),
+
   getBot: (id: number) => request<Bot>(`/api/bots/${id}`),
 
   getBotVersion: (botId: number, versionId: number) =>
@@ -605,12 +700,11 @@ export const api = {
 
   // Knowledge (RAG) — embedding model changes & reindex
   getKnowledgeStatus: () => request<KnowledgeStatusResponse>('/api/config/knowledge/status'),
-
   // Message versions
   getMessageVersions: (threadId: number, messageId: number) =>
     request<{ versions: Message[] }>(`/api/threads/${threadId}/messages/${messageId}/versions`),
-
   getPersona: (id: number) => request<Persona>(`/api/personas/${id}`),
+  getSkill: (id: number) => request<SkillDTO>(`/api/skills/${id}`),
   // Threads
   getThread: (id: number) => request<Thread>(`/api/threads/${id}`),
   // Header-level thread stats used by the chat header — full count,
@@ -618,6 +712,7 @@ export const api = {
   getThreadStats: (threadId: number) => request<ThreadStats>(`/api/threads/${threadId}/stats`),
   // Health
   health: () => request<{ status: string }>('/api/health'),
+
   importBot: async (file: File): Promise<{ id: number }> => {
     const form = new FormData();
     form.append('file', file);
@@ -663,10 +758,13 @@ export const api = {
   },
   // Bots
   listBots: () => request<Bot[]>('/api/bots'),
-
+  listBotSkills: (botId: number) =>
+    request<SkillDTO[]>(`/api/bots/${botId}/skills`),
   listBotThreads: (botId: number) => request<Thread[]>(`/api/bots/${botId}/threads`),
+
   // Bot versioning
   listBotVersions: (botId: number) => request<BotVersion[]>(`/api/bots/${botId}/versions`),
+
   listFilesForMessage: (threadId: number, messageId: number) =>
     request<ThreadFileDTO[]>(`/api/threads/${threadId}/messages/${messageId}/files`),
   // Knowledge
@@ -679,14 +777,19 @@ export const api = {
     if (beforeId !== null) params.set('before_id', String(beforeId));
     return request<Message[]>(`/api/threads/${id}/messages?${params}`);
   },
-
   // Personas
   listPersonas: () => request<Persona[]>('/api/personas'),
-
   // Recent threads
   listRecentThreads: (limit = 30, botId?: number) =>
     request<RecentThread[]>(`/api/threads/recent?limit=${limit}${botId ? `&bot_id=${botId}` : ''}`),
-
+  // Skills — Claude/Anthropic style reusable instructions
+  listSkills: (q?: null | string, tag?: null | string) => {
+    const params = new URLSearchParams();
+    if (q) params.set('q', q);
+    if (tag) params.set('tag', tag);
+    const qs = params.toString();
+    return request<SkillDTO[]>(`/api/skills${qs ? `?${qs}` : ''}`);
+  },
   listThreadFiles: (threadId: number) => request<ThreadFileDTO[]>(`/api/threads/${threadId}/files`),
 
   // Message regeneration (SSE stream)
@@ -712,10 +815,12 @@ export const api = {
       body: JSON.stringify({ new_name: newName, old_name: oldName }),
       method: 'POST',
     }),
+
   renameThread: (id: number, name: string) =>
     request<{ ok: boolean }>(`/api/threads/${id}?name=${encodeURIComponent(name)}`, {
       method: 'PUT',
     }),
+
   replaceCategories: (categories: string[]) =>
     request<string[]>('/api/bots/categories', {
       body: JSON.stringify({ categories }),
@@ -726,7 +831,6 @@ export const api = {
       `/api/bots/${botId}/versions/${versionId}/restore`,
       { method: 'POST' },
     ),
-
   // Message retry (reuse existing user message, no duplicate)
   retryMessage: async (
     threadId: number,
@@ -750,15 +854,16 @@ export const api = {
     request<{ ok: boolean }>(`/api/threads/${id}/persona?persona_id=${personaId ?? 0}`, {
       method: 'PUT',
     }),
-
   // Reindex a stale embedding collection (returns job_id, supports SSE streaming + cancel)
   startReindex: () =>
     request<ReindexStartResponse>('/api/config/knowledge/reindex', { method: 'POST' }),
+
   // Thread summary
   summarizeThread: (threadId: number) =>
     request<{ ok: boolean; summary: null | string }>(`/api/threads/${threadId}/summarize`, {
       method: 'POST',
     }),
+
   // Switch active version
   switchVersion: (threadId: number, messageId: number, versionId: number) =>
     request<{ message: Message; success: boolean }>(
@@ -792,7 +897,11 @@ export const api = {
       world_state_prompt?: string;
     },
   ) => request<{ ok: boolean }>(`/api/bots/${id}`, { body: JSON.stringify(data), method: 'PUT' }),
-
+  updateBotSkills: (botId: number, skillIds: number[]) =>
+    request<{ ok: boolean; skills: BotSkillDTO[] }>(`/api/bots/${botId}/skills`, {
+      body: JSON.stringify({ skill_ids: skillIds }),
+      method: 'PUT',
+    }),
   updateConfig: (data: {
     context_compression_enabled?: boolean;
     context_compression_keep_recent?: number;
@@ -801,6 +910,7 @@ export const api = {
     embedding_base_url?: null | string;
     embedding_model?: string;
     fast_model?: string;
+    format_standart_rp_enabled?: boolean;
     history_limit?: number;
     knowledge_relevance_threshold?: number;
     language?: string;
@@ -846,6 +956,12 @@ export const api = {
     data: { avatar_path?: null | string; description?: string; name: string },
   ) =>
     request<{ ok: boolean }>(`/api/personas/${id}`, { body: JSON.stringify(data), method: 'PUT' }),
+
+  updateSkill: (id: number, data: UpdateSkillCommand) =>
+    request<{ ok: boolean }>(`/api/skills/${id}`, {
+      body: JSON.stringify(data),
+      method: 'PUT',
+    }),
 
   // Avatar upload
   uploadAvatar: async (file: File): Promise<string> => {

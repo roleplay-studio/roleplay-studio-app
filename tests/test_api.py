@@ -534,6 +534,7 @@ class TestConfig:
         assert "chat_model" in data
         assert "db_path" in data
         assert "api_key_configured" in data
+        assert "format_standart_rp_enabled" in data
 
 
 # ── Categories ──────────────────────────────────────────────────────

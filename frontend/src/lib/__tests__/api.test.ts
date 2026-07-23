@@ -44,6 +44,7 @@ describe('AppConfig', () => {
       embedding_model: '',
       environment: 'development',
       fast_model: 'mock',
+      format_standart_rp_enabled: true,
       history_limit: 1000,
       knowledge_relevance_threshold: 0.3,
       language: 'en',
@@ -69,6 +70,11 @@ describe('updateConfig payload', () => {
     // required one with `history_limit`.
     const payload = { history_limit: 750 };
     expect(payload.history_limit).toBe(750);
+  });
+
+  it('supports toggling format-standart-rp from Settings', () => {
+    const payload = { format_standart_rp_enabled: false };
+    expect(payload.format_standart_rp_enabled).toBe(false);
   });
 });
 

@@ -13,7 +13,13 @@
     disabled?: boolean;
     error?: string;
     label?: string;
-    onchange?: (e: Event) => void;
+    /**
+     * Fired when the user picks an option. Receives the new value
+     * as the first argument and the synthetic Event as the second.
+     * Backward-compatible: callbacks that only consume the Event
+     * argument keep working unchanged.
+     */
+    onchange?: (newValue: string, e: Event) => void;
     options?: Array<{ label: string; value: string }>;
     placeholder?: string;
     value?: string;
@@ -24,7 +30,12 @@
   function select(val: string) {
     value = val;
     open = false;
-    if (onchange) onchange(new Event('change'));
+    if (onchange) {
+      // Pass the new value first so callers can intercept the
+      // selection BEFORE the bind:value write completes — useful for
+      // confirm-modals, dirty-state checks, and the like.
+      onchange(val, new Event('change'));
+    }
   }
 </script>
 

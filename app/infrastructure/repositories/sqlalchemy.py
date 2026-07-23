@@ -18,6 +18,7 @@ from sqlalchemy import (
 )
 from sqlalchemy import (
     func,
+    or_,
     select,
     text,
 )
@@ -34,6 +35,7 @@ from app.application.dto import (
     UserPersonaDTO,
 )
 from app.application.exceptions import NotFoundError
+from app.application.ports import DeleteSkillResult
 from app.domain.enums import BotType
 from app.infrastructure.config import Settings
 from app.infrastructure.db.models import (
@@ -42,6 +44,7 @@ from app.infrastructure.db.models import (
     BotVersion,
     ChatThread,
     Conversation,
+    GlobalSkill,
     ThreadFile,
     UserPersona,
 )
@@ -198,6 +201,21 @@ class SqlAlchemyStore:
         # m11: flip the guard *after* the actual work succeeded so
         # a failed init_db stays retriable on the next call.
         self._db_initialized = True
+        # Seed default skills after migrations land. Idempotent —
+        # no-op when the library already has rows (spec §4.3).
+        # Wrapped in try/except because some tests monkey-patch
+        # alembic.command.upgrade (so the global_skills table never
+        # exists in those test scenarios) — the seed is best-effort
+        # here and the application bootstrap will retry it on the
+        # next real startup.
+        try:
+            await SqlAlchemySkillRepository._seed_if_empty(self)
+        except Exception as exc:
+            logger.debug(
+                "[skills-seed] skipped after init_db: %s "
+                "(typically a test that mocked alembic upgrade)",
+                exc,
+            )
 
     async def health_check(self) -> None:
         """Round-trip a trivial query so the liveness probe can fail fast.
@@ -626,6 +644,7 @@ class SqlAlchemyThreadRepository:
 
                 result.append(
                     RecentThreadDTO(
+                        name=row.name,
                         thread_id=row.thread_id,
                         bot_id=row.bot_id,
                         summary=row.summary,
@@ -690,6 +709,7 @@ class SqlAlchemyThreadRepository:
                     SELECT
                         t.id AS thread_id,
                         t.bot_id,
+                        t.name,
                         t.summary,
                         b.name AS bot_name,
                         b.avatar_path AS bot_avatar_path,
@@ -750,6 +770,7 @@ class SqlAlchemyThreadRepository:
                 preview_text: str = short if short else (row.last_message_preview or "")[:150]
                 result.append(
                     RecentThreadDTO(
+                        name=row.name,
                         thread_id=row.thread_id,
                         bot_id=row.bot_id,
                         summary=row.summary,
@@ -1845,3 +1866,277 @@ class SqlAlchemySettingsRepository:
                     .values(bot_categories_json=payload)
                 )
                 await session.commit()
+
+
+class SqlAlchemySkillRepository:
+    """SQLAlchemy implementation of :class:`SkillRepository`. See spec §6.1.
+
+    Lives here (not in a separate file) because every other SqlAlchemy
+    repository in this module follows the same pattern — one class per
+    table, kept together for diff hygiene. The class is intentionally
+    small (~150 lines): the persistence concerns are simple, and the
+    service layer above carries all the validation.
+    """
+
+    def __init__(self, store: SqlAlchemyStore) -> None:
+        self._store = store
+
+    async def create(
+        self,
+        name: str,
+        description: str,
+        instruction: str,
+        tags: list[str],
+    ) -> int:
+        """Insert a new skill. Raises ``ValueError`` on duplicate name.
+
+        Uniqueness is checked explicitly (rather than relying on
+        IntegrityError from the DB) because the resulting error message
+        is more useful for the API layer — the service maps it to a
+        409 ConflictError with a clean ``detail`` string.
+        """
+        normalised_tags = self._normalise_tags(tags)
+        async with self._store._async_session_factory() as session:
+            existing = await session.execute(
+                select(GlobalSkill).where(GlobalSkill.name == name)
+            )
+            if existing.scalar_one_or_none() is not None:
+                raise ValueError(f"Skill with name {name!r} already exists")
+            skill = GlobalSkill(
+                name=name,
+                description=description,
+                instruction=instruction,
+                tags=json.dumps(normalised_tags),
+            )
+            session.add(skill)
+            await session.commit()
+            await session.refresh(skill)
+            return skill.id
+
+    async def get(self, skill_id: int) -> GlobalSkill | None:
+        async with self._store._async_session_factory() as session:
+            return await session.get(GlobalSkill, skill_id)
+
+    async def list_all(
+        self,
+        q: str | None = None,
+        tag: str | None = None,
+    ) -> list[GlobalSkill]:
+        """List all skills with optional filter. See spec §6.1."""
+        async with self._store._async_session_factory() as session:
+            stmt = select(GlobalSkill).order_by(GlobalSkill.id.asc())
+            if q:
+                # Case-insensitive substring match against name + description.
+                pattern = f"%{q.lower()}%"
+                stmt = stmt.where(
+                    or_(
+                        func.lower(GlobalSkill.name).like(pattern),
+                        func.lower(GlobalSkill.description).like(pattern),
+                    )
+                )
+            if tag:
+                # tags is JSON-as-TEXT; naive substring on the quoted tag
+                # works because the canonical form is e.g. '["tone","dialog"]'.
+                pattern = f'%"{tag.lower()}"%'
+                stmt = stmt.where(func.lower(GlobalSkill.tags).like(pattern))
+            result = await session.execute(stmt)
+            return list(result.scalars().all())
+
+    async def list_by_ids(self, ids: list[int]) -> list[GlobalSkill]:
+        """Bulk fetch by id. Result ordered by id ASC (per spec §6.1).
+
+        Empty input short-circuits — saves a SQL roundtrip for the
+        common case of a bot with no skills attached.
+        """
+        if not ids:
+            return []
+        async with self._store._async_session_factory() as session:
+            result = await session.execute(
+                select(GlobalSkill)
+                .where(GlobalSkill.id.in_(ids))
+                .order_by(GlobalSkill.id.asc())
+            )
+            return list(result.scalars().all())
+
+    async def update(
+        self,
+        skill_id: int,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        instruction: str | None = None,
+        tags: list[str] | None = None,
+    ) -> None:
+        async with self._store._async_session_factory() as session:
+            skill = await session.get(GlobalSkill, skill_id)
+            if skill is None:
+                raise NotFoundError(f"Skill {skill_id} not found")
+            if name is not None:
+                skill.name = name
+            if description is not None:
+                skill.description = description
+            if instruction is not None:
+                skill.instruction = instruction
+            if tags is not None:
+                skill.tags = json.dumps(self._normalise_tags(tags))
+            skill.updated_at = datetime.now(UTC)
+            await session.commit()
+
+    async def delete(self, skill_id: int) -> DeleteSkillResult:
+        """Delete the skill if no bot references it.
+
+        See spec §6.1 for the DeleteSkillResult state machine.
+        """
+        async with self._store._async_session_factory() as session:
+            skill = await session.get(GlobalSkill, skill_id)
+            if skill is None:
+                return DeleteSkillResult(deleted=False, attached_to=[])
+            attached = await self._find_attached_bot_ids(session, skill_id)
+            if attached:
+                return DeleteSkillResult(deleted=False, attached_to=attached)
+            await session.delete(skill)
+            await session.commit()
+            return DeleteSkillResult(deleted=True)
+
+    async def count_attached(self, skill_id: int) -> int:
+        async with self._store._async_session_factory() as session:
+            attached = await self._find_attached_bot_ids(session, skill_id)
+            return len(attached)
+
+    async def _find_attached_bot_ids(
+        self,
+        session: AsyncSession,
+        skill_id: int,
+    ) -> list[int]:
+        """Find all bot IDs whose ``skill_ids`` JSON contains ``skill_id``.
+
+        O(N) over the bots table — small N (catalog is hand-curated,
+        users have dozens not thousands of bots), so an indexed lookup
+        would be premature optimisation. If we ever scale to thousands
+        of bots per user, the right move is a M2M ``bot_skills`` table
+        (see spec §4.1 trade-offs).
+        """
+        result = await session.execute(select(Bot.id, Bot.skill_ids))
+        attached: list[int] = []
+        for bot_id, skill_ids_json in result.all():
+            try:
+                ids = json.loads(skill_ids_json or "[]")
+            except json.JSONDecodeError:
+                continue
+            if skill_id in ids:
+                attached.append(bot_id)
+        return attached
+
+    @staticmethod
+    def _normalise_tags(tags: list[str]) -> list[str]:
+        """Lowercase, strip, dedupe. Preserve insertion order.
+
+        Kept as a private static so callers don't bypass it — all writes
+        go through ``create`` / ``update`` which call this.
+        """
+        seen: set[str] = set()
+        out: list[str] = []
+        for t in tags:
+            t = t.strip().lower()
+            if t and t not in seen:
+                seen.add(t)
+                out.append(t)
+        return out
+
+    # ── Seed (spec §4.3) ─────────────────────────────────────────────
+    #
+    # Four built-in skills that ship with every install. Operators can
+    # edit / delete them after first run — the seed only fires on a
+    # genuinely empty table (COUNT(*) == 0).
+
+    _SEED_SKILLS: tuple[dict[str, object], ...] = (
+        {
+            "name": "Sarcastic",
+            "description": (
+                "Speak with dry wit and irony. Apply when the user uses "
+                "sarcasm first or the conversation tone is already light. "
+                "Avoid in serious emotional scenes."
+            ),
+            "instruction": (
+                "Apply Sarcastic when the user opens with sarcasm, irony, "
+                "or a teasing remark. Match their tone — don't escalate to "
+                "genuine rudeness, just playful dryness. Avoid during "
+                "emotional scenes, confessions, or serious plot moments."
+            ),
+            "tags": ["tone", "dialog"],
+        },
+        {
+            "name": "Concise",
+            "description": (
+                "Keep replies under 3 sentences unless the user asks for "
+                "depth. Apply when the user asks a quick question or "
+                "signals impatience."
+            ),
+            "instruction": (
+                "Apply Concise when the user's message is short, direct, "
+                "or clearly time-pressured (e.g. 'quick question', 'in one "
+                "sentence'). Default to 1-3 sentences. Do NOT apply if the "
+                "user asks 'explain', 'tell me about', or similar "
+                "depth-seeking phrasings."
+            ),
+            "tags": ["tone"],
+        },
+        {
+            "name": "Code Reviewer",
+            "description": (
+                "When the user pastes code, review it line-by-line with "
+                "specific suggestions. Apply only when the user message "
+                "contains code or explicitly asks for review."
+            ),
+            "instruction": (
+                "Apply Code Reviewer ONLY when the user message contains a "
+                "code block (markdown ``` or inline `code`) OR explicitly "
+                "asks 'review this', 'check this code', 'what's wrong with "
+                "this?'. Otherwise ignore. When applied, structure your "
+                "response: 1) overall assessment, 2) specific issues with "
+                "line references, 3) suggested fixes with code snippets."
+            ),
+            "tags": ["code", "technical"],
+        },
+        {
+            "name": "NPC Dialog",
+            "description": (
+                "Stay strictly in character; never break the fourth wall "
+                "or mention being an AI. Apply always for roleplay bots "
+                "with a defined persona."
+            ),
+            "instruction": (
+                "Apply NPC Dialog ALWAYS for roleplay personas. Stay in "
+                "character at all times — never acknowledge being an AI, "
+                "a language model, or following instructions. Reframe "
+                "meta-concepts in-character. If asked something the "
+                "character wouldn't know, respond AS the character would "
+                "(confused, deflecting, etc.) rather than breaking frame."
+            ),
+            "tags": ["rp", "character"],
+        },
+    )
+
+    @staticmethod
+    async def _seed_if_empty(store: SqlAlchemyStore) -> None:
+        """Insert the four built-in skills iff the table is empty.
+
+        Called from :meth:`SqlAlchemyStore.init_db` on every startup.
+        Idempotent — safe to call when the table already has rows.
+        See spec §4.3.
+        """
+        async with store._async_session_factory() as session:
+            count_result = await session.execute(select(func.count(GlobalSkill.id)))
+            existing = count_result.scalar_one()
+            if existing > 0:
+                return
+            for entry in SqlAlchemySkillRepository._SEED_SKILLS:
+                session.add(
+                    GlobalSkill(
+                        name=entry["name"],
+                        description=entry["description"],
+                        instruction=entry["instruction"],
+                        tags=json.dumps(entry["tags"]),
+                    )
+                )
+            await session.commit()

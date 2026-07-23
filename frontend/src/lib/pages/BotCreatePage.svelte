@@ -3,9 +3,10 @@
 
   import { api, API_BASE, BOT_TYPES, type BotType } from '../api';
   import AvatarUpload from '../AvatarUpload.svelte';
+  import { hasHiddenRPContent } from '../botEditor';
   import CategoryPicker from '../CategoryPicker.svelte';
   import { currentLang, t } from '../i18n';
-  import { Input, Select, Textarea } from '../ui';
+  import { Input, Modal, Select, Textarea } from '../ui';
 
   let lang = $state('en');
   let formName = $state('');
@@ -17,9 +18,17 @@
   let formCategories: string[] = $state([]);
   let formAvatarPreview = $state('');
   let formBotType: BotType = $state('rp');
+  // RP-only fields (improve-bot-editor Phase 2 — parity with edit page).
+  // Collapsed-by-default: mes_example has its own "+ Add" button.
+  let formAlternateGreetings: string[] = $state(['']);
+  let formMesExample = $state('');
+  let formDynamicSystemPrompt = $state('');
+  let formWorldStatePrompt = $state('');
   let allCategories: string[] = $state([]);
   let uploading = $state(false);
   let saving = $state(false);
+  // Type-switch confirmation (mirror of BotEditPage's flow).
+  let pendingBotType: BotType | null = $state(null);
 
   onMount(async () => {
     currentLang.subscribe((v) => (lang = v));
@@ -29,6 +38,42 @@
       console.error('Failed to load categories', e);
     }
   });
+
+  function handleBotTypeSelect(newValue: string) {
+    const next = newValue as BotType;
+    const prev = formBotType;
+    if (next === prev) return;
+
+    if (
+      hasHiddenRPContent(prev, {
+        alternate_greetings: formAlternateGreetings,
+        dynamic_system_prompt: formDynamicSystemPrompt,
+        first_message: formFirstMessage,
+        mes_example: formMesExample,
+        world_state_prompt: formWorldStatePrompt,
+      })
+    ) {
+      formBotType = prev;
+      pendingBotType = next;
+      return;
+    }
+    formBotType = next;
+  }
+
+  function confirmBotTypeSwitch() {
+    if (pendingBotType === null) return;
+    formBotType = pendingBotType;
+    formFirstMessage = '';
+    formAlternateGreetings = [''];
+    formScenario = '';
+    formMesExample = '';
+    formWorldStatePrompt = '';
+    pendingBotType = null;
+  }
+
+  function cancelBotTypeSwitch() {
+    pendingBotType = null;
+  }
 
   async function handleAvatarUpload(e: Event) {
     const input = e.target as HTMLInputElement;
@@ -53,16 +98,30 @@
     if (formBotType === 'rp' && !formFirstMessage.trim()) return;
 
     saving = true;
-    const payload = {
+    // Build payload — only include RP-only fields when the type is RP.
+    // The backend already treats missing as default-empty, so omitting
+    // is safer than sending empty strings for assistant/agent.
+    const payload: Parameters<typeof api.createBot>[0] = {
       avatar_path: formAvatarPath || null,
       bot_type: formBotType,
       categories: formCategories,
       description: formDescription || '',
-      first_message: formFirstMessage,
       name: formName,
       personality: formPersonality,
-      scenario: formScenario || '',
     };
+    if (formBotType === 'rp') {
+      payload.scenario = formScenario || '';
+      payload.first_message = formFirstMessage;
+      payload.alternate_greetings = formAlternateGreetings.filter((g) => g.trim() !== '');
+      payload.mes_example = formMesExample || '';
+    }
+    // dynamic_system_prompt + world_state_prompt are sent for all
+    // types — but world_state_prompt is only consumed by RP, so we
+    // skip it for non-RP to keep the payload honest with intent.
+    payload.dynamic_system_prompt = formDynamicSystemPrompt || '';
+    if (formBotType === 'rp') {
+      payload.world_state_prompt = formWorldStatePrompt || '';
+    }
     try {
       await api.createBot(payload);
       window.location.hash = '#/bots';
@@ -113,12 +172,13 @@
 
   <section class="create-section">
     <div class="ray-card">
-      <!-- Bot Type -->
+      <!-- Bot Type — type-switch confirm gated through handleBotTypeSelect. -->
       <div class="field-group">
         <label class="field-label">{t('bot_create.bot_type', lang)}</label>
         <Select
           bind:value={formBotType}
           options={BOT_TYPES.map((bt) => ({ label: bt.label, value: bt.value }))}
+          onchange={handleBotTypeSelect}
         />
       </div>
 
@@ -150,13 +210,21 @@
         />
       </div>
 
-      <!-- Personality -->
+      <!-- Personality — relabeled "System prompt" for assistant / agent
+           types (the same field semantically IS the system prompt
+           outside of character-card conventions). Required for all
+           types. Backend DTO stays ``personality``. -->
       <div class="field-group">
         <label class="field-label"
-          >{t('bot_create.personality', lang)} <span class="required">*</span></label
+          >{formBotType === 'rp'
+            ? t('bot_create.personality', lang)
+            : t('bot_create.personality_label_non_rp', lang)} <span class="required">*</span></label
         >
         <Textarea
           bind:value={formPersonality}
+          hint={formBotType === 'rp'
+            ? undefined
+            : t('bot_create.personality_hint_non_rp', lang)}
           required
           rows={5}
           placeholder={t('bot_create.personality_placeholder', lang)}
@@ -187,16 +255,84 @@
         />
       </div>
 
-      <!-- Categories -->
-      <div class="field-group">
-        <CategoryPicker
-          {allCategories}
-          selected={formCategories}
-          onchange={(cats) => (formCategories = cats)}
-        />
-      </div>
-    </div>
-  </section>
+      <!-- Alternate greetings (RP-only) — minimal single-row editor.
+               A full tabbed editor (like BotEditPage) is overkill for
+               the create flow. -->
+          {#if formBotType === 'rp'}
+            <div class="field-group">
+              <label class="field-label">{t('bot_edit.greetings', lang)}</label>
+              <Textarea
+                value={formAlternateGreetings[0] ?? ''}
+                oninput={(e) =>
+                  (formAlternateGreetings = [(e.target as HTMLTextAreaElement).value])}
+                rows={3}
+                placeholder={t('bot_edit.greetings_placeholder', lang)}
+              />
+              <p class="field-hint">{t('bot_edit.first_message_hint', lang)}</p>
+            </div>
+          {/if}
+
+          <!-- mes_example (RP-only) — single textarea, raw V2 format. -->
+          {#if formBotType === 'rp'}
+            <div class="field-group">
+              <label class="field-label">{t('bot_edit.mes_example', lang)}</label>
+              <Textarea
+                bind:value={formMesExample}
+                rows={5}
+                placeholder={t('bot_edit.mes_example_raw_hint', lang)}
+              />
+            </div>
+          {/if}
+
+          <!-- Floating system prompt — all bot types. -->
+          <div class="field-group">
+            <label class="field-label">{t('bot_edit.dynamic_system_prompt', lang)}</label>
+            <Textarea
+              bind:value={formDynamicSystemPrompt}
+              hint={t('bot_edit.dynamic_system_prompt_hint', lang)}
+              rows={3}
+            />
+          </div>
+
+          <!-- World-state prompt (RP-only). -->
+          {#if formBotType === 'rp'}
+            <div class="field-group">
+              <label class="field-label">{t('bot_edit.world_state_prompt', lang)}</label>
+              <Textarea
+                bind:value={formWorldStatePrompt}
+                rows={4}
+                placeholder="e.g. Emit a YAML block with keys: location, time_of_day, present_characters."
+              />
+            </div>
+          {/if}
+
+          <!-- Categories -->
+          <div class="field-group">
+            <CategoryPicker
+              {allCategories}
+              selected={formCategories}
+              onchange={(cats) => (formCategories = cats)}
+            />
+          </div>
+        </div>
+
+        <!-- Type-switch confirmation modal. -->
+        <Modal
+          open={pendingBotType !== null}
+          title={t('bot_edit.confirm_type_switch.title', lang)}
+          onclose={cancelBotTypeSwitch}
+        >
+          <p class="modal-body">{t('bot_edit.confirm_type_switch.body', lang)}</p>
+          <div class="modal-actions">
+            <button class="ray-btn" onclick={cancelBotTypeSwitch}>
+              {t('bot_edit.confirm_type_switch.cancel', lang)}
+            </button>
+            <button class="ray-btn primary" onclick={confirmBotTypeSwitch}>
+              {t('bot_edit.confirm_type_switch.confirm', lang)}
+            </button>
+          </div>
+        </Modal>
+      </section>
 </div>
 
 <style>

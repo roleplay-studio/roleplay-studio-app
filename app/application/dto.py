@@ -13,7 +13,7 @@ import typing
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.domain.enums import BotType
 
@@ -85,6 +85,15 @@ class BotResponse(BaseModel):
     # deserialise cleanly.
     dynamic_system_prompt: str = ""
     world_state_prompt: str = ""
+    # Attached skills (Phase 2 / Task 13). Stored as a JSON list of
+    # skill IDs in ``Bot.skill_ids``. The API exposes just the IDs
+    # here (slim — no instruction payload); the frontend calls
+    # ``GET /api/bots/{id}/skills`` separately when it needs the
+    # full SkillDTO list. ``skills_invalid`` lists IDs that no
+    # longer resolve to a live GlobalSkill — frontend can offer a
+    # "remove orphan" shortcut, mirroring the categories pattern.
+    skills: list[int] = Field(default_factory=list)
+    skills_invalid: list[int] = Field(default_factory=list)
 
     @classmethod
     def from_orm_bot(
@@ -92,6 +101,7 @@ class BotResponse(BaseModel):
         bot: Bot,
         thread_count: int = 0,
         valid_categories: set[str] | None = None,
+        valid_skill_ids: set[int] | None = None,
     ) -> BotResponse:
         """Build an API response from a SQLModel Bot instance.
 
@@ -102,6 +112,13 @@ class BotResponse(BaseModel):
         unchanged). When ``None`` (e.g. legacy test fixtures),
         ``categories_invalid`` defaults to empty so the existing
         contract is preserved.
+
+        ``valid_skill_ids`` follows the same pattern for the Skills
+        feature. When supplied, every entry in ``bot.skill_ids`` is
+        cross-referenced against the live GlobalSkill library and
+        orphan IDs land in ``skills_invalid``. The raw list goes
+        straight into ``skills`` regardless (preserves the on-disk
+        history). When ``None``, ``skills_invalid`` is empty.
         """
         cats: list[str] = []
         if isinstance(bot.categories, str):
@@ -128,6 +145,24 @@ class BotResponse(BaseModel):
         if valid_categories is not None and cats:
             invalid = [c for c in cats if c not in valid_categories]
 
+        # Phase 2 / Task 13 — skills projection.
+        # Mirrors the categories block above: defensive JSON parse,
+        # cross-reference against valid_skill_ids, raw list preserved.
+        skill_ids: list[int] = []
+        skill_ids_raw = getattr(bot, "skill_ids", "[]") or "[]"
+        if isinstance(skill_ids_raw, list):
+            skill_ids = [int(i) for i in skill_ids_raw if isinstance(i, (int, float))]
+        elif isinstance(skill_ids_raw, str):
+            try:
+                parsed = json.loads(skill_ids_raw)
+                if isinstance(parsed, list):
+                    skill_ids = [int(i) for i in parsed if isinstance(i, (int, float))]
+            except (json.JSONDecodeError, TypeError):
+                skill_ids = []
+        skills_invalid: list[int] = []
+        if valid_skill_ids is not None and skill_ids:
+            skills_invalid = [i for i in skill_ids if i not in valid_skill_ids]
+
         return cls(
             id=bot.id,
             name=bot.name,
@@ -144,6 +179,8 @@ class BotResponse(BaseModel):
             mes_example=getattr(bot, "mes_example", "") or "",
             dynamic_system_prompt=getattr(bot, "dynamic_system_prompt", "") or "",
             world_state_prompt=getattr(bot, "world_state_prompt", "") or "",
+            skills=skill_ids,
+            skills_invalid=skills_invalid,
         )
 
 
@@ -264,6 +301,7 @@ class RecentThreadDTO(BaseModel):
     """
 
     thread_id: int
+    name: str
     bot_id: int
     bot_name: str
     bot_avatar_path: str | None = None
@@ -449,6 +487,15 @@ class ConversationRequest(BaseModel):
     # floating reminder so the LLM sees the freshest world context
     # before the new user turn.
     prev_world_state: str = ""
+    # Resolved list of skills attached to this bot. Populated by
+    # ``ChatService._build_request`` from ``Bot.skill_ids`` joined
+    # against the global ``GlobalSkill`` table. Empty list = no
+    # skills (the orchestrator omits the <Skills> block entirely).
+    # The orchestrator renders these as a single
+    # ``<Skills>...</Skills>`` system message placed right after
+    # ``<Persona>/<Scenario>`` so the LLM sees the behavioural
+    # rules in a stable position. See spec §7.
+    skills: list[SkillDTO] = Field(default_factory=list)
 
 
 # ── File Upload DTO ─────────────────────────────────────────────────
@@ -523,3 +570,148 @@ class BotVersionDTO(BaseModel):
     source: Literal["manual", "auto"] = "manual"
     created_at: datetime
     snapshot: dict[str, object] | None = None
+
+
+# ── Skills (Phase 2) ─────────────────────────────────────────────
+#
+# DTOs for the Skills feature. See spec §5.1, §5.2, §5.3.
+#
+# Pattern: ``*Command`` = inbound (POST/PUT body), ``*DTO`` = outbound
+# (response shape). ``BotSkillDTO`` is the lightweight projection of
+# ``SkillDTO`` used by ``BotResponse.skills`` — NO ``instruction`` to
+# keep ``GET /api/bots`` payload small.
+
+
+class SkillDTO(BaseModel):
+    """API response for a single :class:`GlobalSkill`. See spec §5.1.
+
+    Used by:
+    - ``GET /api/skills/{id}``
+    - ``GET /api/skills`` (list)
+    - ``GET /api/bots/{bot_id}/skills`` (resolved list)
+    - ``ConversationRequest.skills`` (orchestrator input)
+    """
+
+    id: int
+    name: str
+    description: str
+    instruction: str
+    tags: list[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+
+class CreateSkillCommand(BaseModel):
+    """``POST /api/skills`` body. See spec §5.1.
+
+    Validation:
+    - ``name`` — stripped of whitespace; non-empty after trim; ≤64 chars
+    - ``description`` — ≤300 chars (optional)
+    - ``instruction`` — non-empty; ≤4000 chars (caps prompt cost)
+    - ``tags`` — lowercased + stripped + deduped (insertion order kept)
+    """
+
+    name: str = Field(min_length=1, max_length=64)
+    description: str = Field(default="", max_length=300)
+    instruction: str = Field(min_length=1, max_length=4000)
+    tags: list[str] = Field(default_factory=list)
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("name must be non-empty after trim")
+        return v
+
+    @field_validator("tags")
+    @classmethod
+    def _normalize_tags(cls, v: list[str]) -> list[str]:
+        """Lowercase, strip, dedupe. Preserve insertion order.
+
+        Matches :meth:`SqlAlchemySkillRepository._normalise_tags` —
+        single source of truth for tag canonicalisation.
+        """
+        seen: set[str] = set()
+        out: list[str] = []
+        for t in v:
+            t = t.strip().lower()
+            if t and t not in seen:
+                seen.add(t)
+                out.append(t)
+        return out
+
+
+class UpdateSkillCommand(BaseModel):
+    """``PUT /api/skills/{id}`` body. All fields optional.
+
+    Only the supplied fields are touched by the service layer; ``None``
+    means "leave unchanged" (parity with other Update*Command shapes
+    in this module — see ``UpdatePersonaCommand``).
+    """
+
+    name: str | None = Field(default=None, min_length=1, max_length=64)
+    description: str | None = Field(default=None, max_length=300)
+    instruction: str | None = Field(default=None, min_length=1, max_length=4000)
+    tags: list[str] | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            raise ValueError("name must be non-empty after trim")
+        return v
+
+    @field_validator("tags")
+    @classmethod
+    def _normalize_tags(cls, v: list[str] | None) -> list[str] | None:
+        if v is None:
+            return None
+        seen: set[str] = set()
+        out: list[str] = []
+        for t in v:
+            t = t.strip().lower()
+            if t and t not in seen:
+                seen.add(t)
+                out.append(t)
+        return out
+
+
+class BotSkillDTO(BaseModel):
+    """Lightweight skill projection for ``BotResponse.skills``. See spec §5.3.
+
+    Excludes ``instruction`` (large markdown blob) to keep
+    ``GET /api/bots`` payload small. Full content is available via
+    ``GET /api/skills/{id}`` for the Library preview modal.
+
+    Includes ``description`` because the chips in the BotEditPage
+    Skills section use it as a tooltip on hover.
+    """
+
+    id: int
+    name: str
+    description: str
+
+
+class UpdateBotSkillsCommand(BaseModel):
+    """``PUT /api/bots/{bot_id}/skills`` body. See spec §5.2.
+
+    Replaces the bot's entire skill list (not a delta). Empty list =
+    clear all skills.
+    """
+
+    skill_ids: list[int] = Field(default_factory=list)
+
+
+class ConflictErrorResponse(BaseModel):
+    """409 response body for skill-deletion conflicts. See spec §6.4.
+
+    Stable shape — the frontend reads ``attached_to`` to render
+    "used by N bots" and offers navigation to the affected bots.
+    """
+
+    detail: str
+    attached_to: list[int] = Field(default_factory=list)

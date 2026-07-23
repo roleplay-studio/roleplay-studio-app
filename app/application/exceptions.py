@@ -15,6 +15,7 @@ from app.domain.exceptions import ConfigurationError as _ConfigurationError
 __all__ = [
     "ApplicationError",
     "ConfigurationError",
+    "ConflictError",
     "ExternalServiceError",
     "NotFoundError",
     "UploadError",
@@ -66,6 +67,31 @@ class UploadError(ValidationError):
     ) -> None:
         super().__init__(message, http_status=http_status)
         self.code = code
+
+
+class ConflictError(ApplicationError):
+    """Resource is in use and cannot be modified/deleted.
+
+    Used by :class:`SkillService.delete_skill` when bots have the skill
+    attached. Carries ``http_status=409`` (mirrors :class:`ValidationError`)
+    so the existing ``application_error_handler`` in ``api/main.py`` maps
+    it correctly without registering a new exception handler.
+
+    The ``attached_to`` list is propagated to the response body by the
+    existing handler — see ``api/main.py::application_error_handler``
+    where ``getattr(exc, 'attached_to', None)`` is added to the body.
+
+    See spec §6.4.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        attached_to: list[int] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.http_status = 409
+        self.attached_to = attached_to or []
 
 
 # Re-exported alias for backward compat — see module docstring.

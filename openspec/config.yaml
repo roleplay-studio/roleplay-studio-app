@@ -1,0 +1,149 @@
+schema: spec-driven
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Project context — shown to AI when creating artifacts.
+# Compact version of AGENTS.md rules; AI should still read AGENTS.md for detail.
+# ─────────────────────────────────────────────────────────────────────────────
+context: |
+  Roleplay Studio — native macOS desktop app for LLM roleplay chats with per-bot
+  RAG, streaming, and story branching. Ships as Tauri 2 + Svelte 5 SPA + FastAPI.
+
+  ## Stack
+  - Backend: Python 3.13+, FastAPI, hypercorn (NOT uvicorn), SQLAlchemy + Alembic,
+    Chroma (per-bot vector collections), LangChain/LangGraph for orchestration,
+    pydantic-settings for config, uv as the only package manager.
+  - Frontend: Svelte 5 (runes, NOT SvelteKit — hash-routing SPA), Tailwind CSS v4
+    + FlyonUI, Vite, Vitest, Playwright (E2E). Service worker only in PROD build.
+  - Storage: SQLite via SQLAlchemy; migrations via Alembic (NOT create_all()).
+  - LLM: OpenRouter via custom HttpLLM (NOT langchain ChatOpenAI).
+
+  ## Architecture (Clean / Hexagonal)
+  api/ → app/application/ (services + DTO + ports) → app/domain/ (entities)
+                                    ↓
+                        app/infrastructure/ (SQLAlchemy, Chroma, HttpLLM)
+  - DI composition in `app/bootstrap.py::build_container()`; routes via
+    `fastapi.Depends` → `api/deps.py`. NO global singletons, NO
+    `from app.infrastructure.db import session` outside infra/.
+  - Naming: services = snake_case.py + CamelCaseService; DTO = CamelCaseDTO;
+    ports = CamelCase Protocol with verb in name (BotRepository, LLMProvider).
+
+  ## TDD is mandatory (Red → Green → Refactor)
+  - Test BEFORE implementation. No commit without a test for the new behavior.
+  - Even trivial changes (rename, new CSS token) need a test in the commit.
+  - First touch of an untested component → add a test in the same commit.
+  - Test fakes must mirror real SQL contracts (DESC ordering, before_id filter,
+    multi-call scenarios). See AGENTS.md §2 "Критично: фейковые репозитории".
+  - New column in DB model = 3-step change — Alembic migration + SQLModel field
+    + DTO projection. ALL THREE required.
+  - Parallel prompt-building paths (`_build_all_messages` vs `_node_user_input`,
+    `regenerate_state` vs `_maybe_run_state_update`) MUST stay in sync. If you
+    touch one, grep and update the other in the same commit.
+
+  ## Verification (docker-only)
+  - NEVER run `pytest`, `ruff`, `npm run lint` directly on host. Use
+    `make docker-test`, `make docker-ruff`, `make docker-frontend-lint`,
+    `make docker-frontend-test`.
+  - Host already has dev servers running (hypercorn :55245, Vite :1420);
+    running pytest/ruff on host causes port conflicts and env pollution
+    (DEBUG/ENVIRONMENT leaked from dev compose).
+  - After any backend change run `make docker-ruff && make docker-test`.
+  - After any frontend change run `make docker-frontend-lint && make docker-frontend-test`.
+  - Multi-layer E2E probe required for features touching more than one layer
+    (Protocol → repo → service → route → DTO → TS interface) —
+    POST new field, GET back, compare.
+
+  ## OCR post-task review (mandatory before checkpoint summary)
+  - After docker verification passes, run `ocr delegate preview` then
+    `ocr delegate rule <files>` and review by category (see AGENTS.md §4b).
+  - Fix critical/high before claiming done. Fallback to manual review by
+    the §4b checklist if `ocr` CLI is unavailable.
+  - CLI: alibaba/open-code-review, skill `open-code-review-delegate`.
+
+  ## Frontend conventions (Raycast-style dark UI)
+  - Canonical doc is docs/DESIGN.md — read FIRST before any UI work.
+  - Mobile conventions in docs/MOBILE_PLAN.md (5 phases completed).
+  - Maple Mono is the only font. Tailwind tokens are `bg-rp-*`, `text-rp-*`,
+    `bg-surface-*`. CSS vars are `--ray-*` and `--color-rp-*`.
+  - Hover: opacity 0.85 for primary, 0.8 for semantic. NO `transform: scale()`
+    or `translateY()` on buttons. NO HTML `title` for tooltips (use `<Tooltip>`).
+  - Border-radius is fixed per component; do NOT change on hover.
+  - All `{#each}` blocks MUST have a key (`{#each items as item (item.id)}`).
+  - Touch targets ≥ 44×44px on mobile.
+  - Atomic components live in `src/lib/ui/` (no domain types); composite in
+    `src/lib/` (domain-aware, demo with mocks). UI catalog at `_catalog/`.
+  - Service worker caches ONLY `GET /api/bots`, `/api/personas`,
+    `/api/categories`, `/uploads/*`. SSE and POST/PUT/DELETE are NEVER cached.
+
+  ## Banned
+  - uvicorn (use hypercorn)
+  - `pip install` (use `uv add`)
+  - `from app.infrastructure import ...` in services (breaks clean arch)
+  - `ChatOpenAI` from langchain (use custom HttpLLM)
+  - hardcoded hex where `--ray-*` / `--color-rp-*` token exists
+  - bare `{#each items as item}` without key
+  - HTML `title=` for tooltips
+  - global font-family override in component CSS
+
+  ## Workflow rhythm
+  - Plan tasks greater than 10 — user often says "batched" or "N фаз",
+    split into 3-5 task phases with checkpoint summary after each,
+    one commit per phase.
+  - Within a phase, "да" or "продолжай" means proceed, do NOT re-prompt.
+  - Conceptual mid-stream questions get a 5-8 line answer with concrete example,
+    then continue implementation. Don't defer with "это в спеке".
+  - Use `# TODO(for-assistant):` markers for deferred fixes; user says
+    "обработай маркеры" to batch-resolve them.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-artifact rules
+# ─────────────────────────────────────────────────────────────────────────────
+rules:
+  proposal:
+    - Keep proposal under 400 words. Link to relevant AGENTS.md sections
+      (for example "follows §1 Clean Architecture, §2 TDD").
+    - MUST include a Non-goals section — explicit list of what is out of scope.
+    - MUST list affected layers (domain, application, infrastructure, api,
+      frontend, mobile, docs) so scope is unambiguous.
+    - MUST reference verification plan — which `make docker-*` targets will prove
+      the change works, and which E2E probe will exercise the multi-layer path.
+    - Note any 3-step change risk — new column, new field, or parallel prompt
+      paths that must stay in sync.
+
+  specs:
+    - Use Given/When/Then scenarios with RFC 2119 keywords (SHALL/MUST/SHOULD).
+    - Each requirement MUST have at least one scenario.
+    - Specs describe WHAT the system does, not HOW (design belongs in design.md).
+    - For DB-touching changes, scenario MUST round-trip — save, re-read,
+      assert field present. This covers the silent-DB-drop class of bugs.
+    - For parallel-path features, scenario MUST cover BOTH paths
+      (for example streaming AND non-streaming, manual AND background regeneration).
+    - Cite AGENTS.md section when a rule constrains the spec
+      (for example "MUST follow §2 TDD — test written before implementation").
+
+  design:
+    - Diagram the layer-by-layer change (api → application → domain →
+      infrastructure → DB migration). For frontend changes, also show
+      component tree and which atomic/composite components are added or touched.
+    - For new DB columns, explicitly list the 3 steps —
+      Alembic migration, SQLModel field, DTO projection — with file:line.
+    - For new ports, define the Protocol signature, name the implementing
+      class, show where it gets injected (bootstrap.py / deps.py).
+    - For parallel-path code, list BOTH paths and how they stay in sync
+      (shared helper vs. must-grep pair).
+    - For frontend UI, cite docs/DESIGN.md sections that apply
+      (colors, typography, components, do/don't).
+    - Risk callouts — known sharp edges, tech debt admitted, v2 fixes punted.
+
+  tasks:
+    - Break tasks into atomic chunks — one test, one implementation, one commit.
+    - Each task MUST include its verification step
+      (for example "✓ make docker-ruff", "✓ make docker-test -k test_xxx").
+    - Group related tasks under phase headers (Phase 1 backend, Phase 2 frontend,
+      Phase 3 E2E). Check off `[x]` as each completes.
+    - TDD ordering is non-negotiable — test task precedes implementation task
+      precedes refactor task.
+    - Include an explicit "OCR post-task review" task at the end of each phase
+      BEFORE the checkpoint summary.
+    - For features touching more than one layer, include a multi-layer E2E
+      probe task — POST new field, GET back, compare. Unit tests don't catch
+      silent DB drops or wrong DTO projection.

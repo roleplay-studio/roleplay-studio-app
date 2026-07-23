@@ -117,7 +117,7 @@
 
     <div class="ti-body">
       <div class="ti-top">
-        <p class="ti-name">{thread.name}</p>
+        <p class="ti-name text-rp-text-tertiary">{thread.name}</p>
         <button
           class="ti-dots"
           onclick={(e) => {
@@ -211,7 +211,6 @@
     margin: 0;
     font-size: 13px;
     font-weight: 500;
-    color: var(--ti-text, #1d1d1f);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;

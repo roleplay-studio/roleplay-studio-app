@@ -14,6 +14,7 @@ from app.application.services import (
     MessageSummarizer,
     PersonaService,
     SettingsService,
+    SkillService,
     SummaryService,
     ThreadService,
     TTSService,
@@ -61,6 +62,10 @@ def build_container(settings: Settings | None = None) -> ApplicationContainer:
     bot_version_svc = BotVersionService(bot_version_repo, bot_repo)
     settings_repo = SqlAlchemySettingsRepository(store)
     settings_svc = SettingsService(settings_repo)
+    # Skills — global library + per-bot subscription service. Shares
+    # the same SqlAlchemy store as the rest of the app (no separate
+    # connection pool — one engine per app, see SqlAlchemyStore).
+    skill_svc = SkillService(store=store, settings=settings)
 
     # LLM — created but NOT yet started. ``startup()`` opens the
     # httpx client; the FastAPI lifespan handler in api/main.py calls
@@ -160,6 +165,11 @@ def build_container(settings: Settings | None = None) -> ApplicationContainer:
             files=files_repo,
             summarizer=summarizer,
             markdown_repairer=markdown_repairer,
+            # Phase 4 / Task 12: wire the global SkillService so
+            # ``_build_request`` can resolve Bot.skill_ids → SkillDTO
+            # for the orchestrator's <Skills> catalog. Same instance
+            # the /api/skills routes use — single source of truth.
+            skill_service=skill_svc,
         )
         if orchestrator
         else None,
@@ -177,6 +187,7 @@ def build_container(settings: Settings | None = None) -> ApplicationContainer:
         markdown_repairer=markdown_repairer,
         settings=settings_svc,
         tts=tts_service,
+        skills=skill_svc,
     )
 
 
@@ -276,5 +287,72 @@ def get_container() -> ApplicationContainer:
 
 
 def reset_container() -> None:
-    """Drop cached application services so the next request uses fresh settings."""
+    """Drop cached application services so the next request uses fresh settings.
+
+    .. deprecated::
+        This sync helper only clears the cache. After dropping the
+        container, the LLM clients inside it must be re-``startup()``-ed
+        for chat requests to work — otherwise every LLM raises
+        ``RuntimeError: client is not initialised`` on the next call.
+        Use :func:`reset_and_start_container` from async code paths
+        (the two ``api/routes/config.py`` and ``api/routes/setup.py``
+        routes that call this are the original sites that hit the
+        bug). Kept for any future sync caller that doesn't need the
+        LLM to be live afterwards (e.g. a test fixture).
+    """
     get_container.cache_clear()
+
+
+async def reset_and_start_container() -> None:
+    """Drop the cached container, build a fresh one, and re-``startup()``
+    its LLM clients. Pair with :func:`shutdown_llms` for the old
+    container so the previous httpx sockets are closed cleanly.
+
+    Why this exists
+    ---------------
+    ``api/main.py::lifespan`` opens the LLM clients **once at process
+    boot** via :func:`startup_llms`. Settings-save and wizard-configure
+    endpoints call :func:`reset_container` to pick up new ``.env`` /
+    ``os.environ`` values, but the old sync helper only clears the
+    ``@lru_cache`` — it does NOT call ``startup_llms`` for the new
+    container. After saving Settings, the user could no longer send
+    chat messages because the new ``BaseOpenAICompatibleLLM`` had
+    ``_async_client = None`` and raised on the first request.
+
+    This async helper closes the old LLM clients, drops the cache,
+    and starts the new LLM clients in one shot. Idempotent: callable
+    multiple times in a row and callable when the cache is empty
+    (e.g. in a unit test that doesn't go through the lifespan).
+    """
+    # 1. If the cache currently holds a container, shut its LLM
+    # clients down. ``shutdown_llms`` is best-effort (it swallows
+    # close() errors), so a transient socket error here cannot
+    # block the new container from being built.
+    try:
+        current = get_container()
+    except Exception:
+        current = None
+    if current is not None:
+        try:
+            await shutdown_llms(current)
+        except Exception:
+            # Belt-and-braces: shutdown_llms already swallows
+            # close() errors per-LLM, but if anything else raises
+            # (e.g. attribute lookup) we still want to drop the
+            # cache and rebuild.
+            pass
+
+    # 2. Drop the cache.
+    get_container.cache_clear()
+
+    # 3. Rebuild through the lru_cache so the very next
+    # ``get_container()`` call returns the SAME instance whose
+    # LLM we just started. Without this, the chat handler would
+    # call ``get_container()`` → ``build_container()`` → a fresh
+    # container with an un-started LLM, the very bug we're fixing.
+    # We can't assign to the lru_cache directly (no public API), so
+    # we build once here and call get_container() once — the second
+    # build is cheap (just object construction, no I/O).
+    build_container()  # kept so any external import that pre-warms
+    cached = get_container()  # this rebuilds AND memoises
+    await startup_llms(cached)
