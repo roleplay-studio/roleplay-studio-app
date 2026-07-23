@@ -38,20 +38,6 @@ else:
 logger = logging.getLogger(__name__)
 
 
-_SNAPSHOT_FIELDS = (
-    "name",
-    "description",
-    "personality",
-    "first_message",
-    "scenario",
-    "avatar_path",
-    "categories",
-    "bot_type",
-    "alternate_greetings",
-    "mes_example",
-)
-
-
 def serialize_bot(bot: Bot) -> str:
     """Return a JSON string snapshot of the bot's user-editable fields.
 
